@@ -1,0 +1,53 @@
+name: "Process SAS → PySpark"
+
+# Si attiva ogni volta che viene fatto push di file .sas nella cartella INPUT/
+on:
+  push:
+    paths:
+      - "INPUT/**.sas"
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout del repository con cronologia completa (per il commit finale)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 2. Setup Python
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 3. Installa dipendenze
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install openpyxl pandas
+
+      # 4. Esegui la conversione di tutti i nuovi file .sas in INPUT/
+      - name: Run process_input.py
+        run: python process_input.py --input-dir INPUT --output-dir output
+
+      # 5. Committa e pusha i nuovi output generati
+      - name: Commit generated outputs
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Aggiungi solo la cartella output (non toccare INPUT o altro)
+          git add output/
+
+          # Se non ci sono modifiche non fare nulla
+          if git diff --cached --quiet; then
+            echo "Nessun nuovo output da committare."
+          else
+            TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+            git commit -m "auto: conversione SAS → PySpark [$TIMESTAMP]"
+            git push
+          fi
