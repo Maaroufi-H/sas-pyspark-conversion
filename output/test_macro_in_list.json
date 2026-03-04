@@ -1,0 +1,80 @@
+[
+  {
+    "uid": "de961dbcb9d4ace0:macro:1:b5cb0d5f1926bfc4",
+    "tipo": "macro_filtra_prodotti(nid,_1",
+    "macro_categoria": "MACRO_DEF",
+    "linea_start": 1,
+    "linea_stop": 25,
+    "chiuso": true,
+    "depth": 0,
+    "convertibile_auto": "SI",
+    "affidabilita_auto": "MEDIA",
+    "testo": "%macro filtra_prodotti(nid, id_prodotto1, id_prodotto2, id_prodotto3);\n\nproc sql;\n    create table work.risultato as\n    select *\n    from source.vendite\n    where prodotto_cod in (\n        %if &nid = 1 %then %do;\n            \"&id_prodotto1.\"\n        %end;\n        %else %do;\n            %do i=1 %to &nid;\n                %if &i ^= &nid %then %do;\n                    \"&&id_prodotto&i\",\n                %end;\n                %else %do;\n                    \"&&id_prodotto&i\"\n                %end;\n            %end;\n        %end;\n    )\n    and data_vendita >= '2024-01-01';\nquit;\n\n%mend filtra_prodotti;\n",
+    "children": [
+      {
+        "uid": "de961dbcb9d4ace0:proc_sql:3:bef6a6d16871c64e",
+        "tipo": "proc_sql_sql;_2",
+        "macro_categoria": "PROC_SQL",
+        "linea_start": 3,
+        "linea_stop": 23,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "ALTA",
+        "testo": "proc sql;\n    create table work.risultato as\n    select *\n    from source.vendite\n    where prodotto_cod in (\n        %if &nid = 1 %then %do;\n            \"&id_prodotto1.\"\n        %end;\n        %else %do;\n            %do i=1 %to &nid;\n                %if &i ^= &nid %then %do;\n                    \"&&id_prodotto&i\",\n                %end;\n                %else %do;\n                    \"&&id_prodotto&i\"\n                %end;\n            %end;\n        %end;\n    )\n    and data_vendita >= '2024-01-01';\nquit;\n",
+        "children": [
+          {
+            "uid": "de961dbcb9d4ace0:ifdo:8:d4f8dec999db3fb7",
+            "tipo": "ifdo_3",
+            "macro_categoria": "IF_BLOCK",
+            "linea_start": 8,
+            "linea_stop": 10,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "MEDIA",
+            "testo": "        %if &nid = 1 %then %do;\n            \"&id_prodotto1.\"\n        %end;\n"
+          },
+          {
+            "uid": "de961dbcb9d4ace0:elsedo:11:04ea9057dd0a265a",
+            "tipo": "elsedo_4",
+            "macro_categoria": "ELSE_BLOCK",
+            "linea_start": 11,
+            "linea_stop": 19,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "MEDIA",
+            "testo": "        %else %do;\n            %do i=1 %to &nid;\n                %if &i ^= &nid %then %do;\n                    \"&&id_prodotto&i\",\n                %end;\n                %else %do;\n                    \"&&id_prodotto&i\"\n                %end;\n            %end;\n",
+            "children": [
+              {
+                "uid": "de961dbcb9d4ace0:ifdo:13:853ea8574a6476a5",
+                "tipo": "ifdo_5",
+                "macro_categoria": "IF_BLOCK",
+                "linea_start": 13,
+                "linea_stop": 15,
+                "chiuso": true,
+                "depth": 3,
+                "convertibile_auto": "SI",
+                "affidabilita_auto": "MEDIA",
+                "testo": "                %if &i ^= &nid %then %do;\n                    \"&&id_prodotto&i\",\n                %end;\n"
+              },
+              {
+                "uid": "de961dbcb9d4ace0:elsedo:16:dacec405db344c89",
+                "tipo": "elsedo_6",
+                "macro_categoria": "ELSE_BLOCK",
+                "linea_start": 16,
+                "linea_stop": 18,
+                "chiuso": true,
+                "depth": 3,
+                "convertibile_auto": "SI",
+                "affidabilita_auto": "MEDIA",
+                "testo": "                %else %do;\n                    \"&&id_prodotto&i\"\n                %end;\n"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
