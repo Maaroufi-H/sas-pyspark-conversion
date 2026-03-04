@@ -123,6 +123,7 @@ class ProcSqlInfo:
     create_table: Optional[str] = None      # CREATE TABLE name AS
     joins: List[Tuple[str, str, str]] = field(default_factory=list)  # (type, table, condition)
     has_dynamic_sql: bool = False           # %str %sysfunc etc.
+    macro_in_lists: List[Tuple[str, str]] = field(default_factory=list)  # (col, raw_macro_block)
     raw_sql: str = ""
 
 
@@ -442,26 +443,68 @@ def _analyse_data_step(testo: str) -> DataStepInfo:
     return info
 
 
+def _detect_macro_in_list_cols(sql_body: str) -> List[Tuple[str, str]]:
+    """
+    Rileva il pattern SAS: col IN ( %if ... %then %do; ... %end; )
+    comunemente usato per generare liste dinamiche di valori in una WHERE.
+
+    Restituisce lista di (nome_colonna, raw_macro_block).
+    """
+    results = []
+    for m in re.finditer(r'\b(\w+)\s+IN\s*\(', sql_body, re.I):
+        col = m.group(1)
+        # Salta keyword SQL che non sono nomi di colonne
+        if col.upper() in ('SELECT', 'FROM', 'WHERE', 'JOIN', 'ON', 'AND', 'OR', 'NOT'):
+            continue
+        start = m.end() - 1  # posizione della '('
+        depth = 0
+        content_start = start + 1
+        i = start
+        while i < len(sql_body):
+            if sql_body[i] == '(':
+                depth += 1
+            elif sql_body[i] == ')':
+                depth -= 1
+                if depth == 0:
+                    content = sql_body[content_start:i]
+                    if re.search(r'%if\b|%do\b', content, re.I):
+                        results.append((col, content.strip()))
+                    break
+            i += 1
+    return results
+
+
 def _analyse_proc_sql(testo: str) -> ProcSqlInfo:
     """Analisi interna di un PROC SQL."""
     info = ProcSqlInfo()
     txt = testo
 
-    # SQL dinamico: macro SAS nel corpo SQL → codice non traducibile direttamente
-    # Include: %str %nrstr %sysfunc %eval call execute
-    #   MA ANCHE: %if/%then/%do dentro il corpo della query (colonne dinamiche)
-    info.has_dynamic_sql = bool(
-        re.search(
-            r'%str\b|%nrstr\b|%sysfunc\b|%eval\b|call\s+execute'
-            r'|%if\b.*?%then\b|%do\b|%end\b',
-            txt, re.I | re.S
-        )
-    )
-
     # Estrae il corpo tra PROC SQL; ... QUIT;
     m_body = re.search(r'proc\s+sql[^;]*;(.*?)(?:quit|run)\s*;', txt, re.I | re.S)
     body = m_body.group(1).strip() if m_body else txt
     info.raw_sql = body
+
+    # ── Rilevamento pattern IN (macro_loop) ─────────────────────────
+    # Pattern comune: WHERE col IN ( %if &n=1 %then %do; val %end; %else %do; ... %end; )
+    # Questi blocchi sono convertibili in PySpark con .isin(lista) + TODO per la risoluzione
+    # delle variabili macro, e NON devono bloccare l'intera conversione.
+    info.macro_in_lists = _detect_macro_in_list_cols(body)
+
+    # Testo SQL senza i blocchi IN-macro (per valutare il dinamismo residuo)
+    body_without_in_lists = body
+    for _col, _block in info.macro_in_lists:
+        # Rimuove il blocco macro dall'analisi del dinamismo residuo
+        body_without_in_lists = body_without_in_lists.replace(_block, "_MACRO_IN_LIST_PLACEHOLDER_")
+
+    # SQL davvero dinamico: %str %nrstr %sysfunc %eval call execute nel corpo SQL
+    # oppure macro complesse (non solo IN-list) che impediscono la conversione automatica
+    _truly_dynamic_patterns = (
+        r'%str\b|%nrstr\b|%sysfunc\b|%eval\b|call\s+execute'
+        r'|%if\b.*?%then\b|%do\b|%end\b'
+    )
+    info.has_dynamic_sql = bool(
+        re.search(_truly_dynamic_patterns, body_without_in_lists, re.I | re.S)
+    )
 
     # CREATE TABLE name AS
     m_ct = re.search(r'create\s+table\s+([\w.]+)\s+as', body, re.I)
@@ -830,6 +873,23 @@ def convert_proc_sql(
 
     lines = [header]
 
+    # ── Genera variabili Python per le liste IN da macro SAS ─────────
+    # Pattern: WHERE col IN (%if &n=1 %then %do; val1 %end; %else %do i=1 %to &n; ...)
+    # Converte in: _col_values = []  # TODO + df.filter(F.col("col").isin(_col_values))
+    isin_filters = []
+    for col_name, macro_block in info.macro_in_lists:
+        py_list_var = f"_{col_name.lower()}_values"
+        # Estrae suggerimento sui nomi delle variabili macro usate nel blocco
+        macro_var_hints = sorted(set(re.findall(r'&{1,2}(\w+)', macro_block)))
+        hint_str = ", ".join(f"&{v}" for v in macro_var_hints) if macro_var_hints else "variabili macro SAS"
+        lines += [
+            f"{pad}# LISTA IN generata da macro SAS per la colonna '{col_name}':",
+            f"{pad}# SAS usa un loop %do per costruire i valori a runtime.",
+            f"{pad}# Variabili macro da risolvere: {hint_str}",
+            f"{pad}{py_list_var} = []  # TODO: popola con i valori delle variabili macro",
+        ]
+        isin_filters.append((col_name, py_list_var))
+
     # Estrae il SQL grezzo e crea una variabile
     py_out = _sas_to_py_var(info.create_table) if info.create_table else "df_sql"
     if info.create_table:
@@ -837,9 +897,34 @@ def convert_proc_sql(
 
     # Strategia: spark.sql() direttamente (il più affidabile)
     raw = info.raw_sql.strip()
-    # sostituisce nomi di dataset con i loro equivalenti Spark
+
+    # Ripulisce il SQL dai blocchi macro IN: rimuove l'intera condizione "col IN (macro)"
+    # dalla WHERE clause — il filtro sarà applicato via .filter().isin() sul DataFrame.
+    for col_name, macro_block in info.macro_in_lists:
+        # Rimuove: [AND|OR] col IN (\n  macro_block\n)  oppure col IN (...) [AND|OR]
+        # Gestisce sia posizione iniziale che intermedia nella WHERE
+        escaped_col = re.escape(col_name)
+        escaped_block = re.escape(macro_block)
+        # Pattern: (AND|OR)? col IN ( macro_block )
+        raw = re.sub(
+            r'(?:(?<=\s)|(?<=\())(?:AND\s+|OR\s+)?' + escaped_col
+            + r'\s+IN\s*\(\s*' + escaped_block + r'\s*\)(?:\s+AND|\s+OR)?',
+            '',
+            raw,
+            flags=re.I | re.S,
+        )
+        # Se rimane una WHERE vuota (solo spazi/newline/;), la rimuove
+        raw = re.sub(r'\bwhere\s*(?:and\s+|or\s+)?(?=group\b|order\b|having\b|;|$)',
+                     '', raw, flags=re.I | re.S)
+
+    # Sostituisce nomi di dataset con i loro equivalenti Spark
     for sas_name, py_var in ctx.available_dfs.items():
         raw = re.sub(r'\b' + re.escape(sas_name) + r'\b', py_var, raw, flags=re.I)
+
+    if isin_filters:
+        lines.append(
+            f"{pad}# NOTA: le condizioni IN con macro SAS sono applicate via .filter().isin() dopo la query"
+        )
 
     if info.into_var:
         lines += [
@@ -850,12 +935,23 @@ def convert_proc_sql(
     elif info.create_table:
         lines += [
             f"{pad}{py_out} = {ctx.spark_session_var}.sql(\"\"\"{raw}\"\"\")",
-            f"{pad}{py_out}.write.mode(\"overwrite\").saveAsTable(\"{info.create_table}\")",
         ]
+        # Applica i filtri .isin() per le liste IN generate da macro
+        for col_name, py_list_var in isin_filters:
+            lines.append(
+                f"{pad}{py_out} = {py_out}.filter(F.col(\"{col_name}\").isin({py_list_var}))"
+            )
+        lines.append(
+            f"{pad}{py_out}.write.mode(\"overwrite\").saveAsTable(\"{info.create_table}\")"
+        )
     else:
         lines += [
             f"{pad}{py_out} = {ctx.spark_session_var}.sql(\"\"\"{raw}\"\"\")",
         ]
+        for col_name, py_list_var in isin_filters:
+            lines.append(
+                f"{pad}{py_out} = {py_out}.filter(F.col(\"{col_name}\").isin({py_list_var}))"
+            )
 
     lines.append(f"{pad}# TODO: verifica SQL e nomi tabelle/alias")
     return "\n".join(lines)
