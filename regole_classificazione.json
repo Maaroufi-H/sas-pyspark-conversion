@@ -1,0 +1,134 @@
+{
+  "data": [
+    {
+      "nome_regola": "Hash/Array/Retain/First./Last. - strutture non convertibili",
+      "keywords_presenti": ["\\bhash\\b", "\\barray\\b", "\\bretain\\b", "\\bfirst\\.", "\\blast\\."],
+      "logica": "ANY",
+      "convertibile": "NO",
+      "affidabilita": "BASSA"
+    },
+    {
+      "nome_regola": "MERGE statement",
+      "keywords_presenti": ["\\bmerge\\b"],
+      "logica": "ANY",
+      "convertibile": "SI",
+      "affidabilita": "MEDIA"
+    },
+    {
+      "nome_regola": "SET semplice con o senza WHERE/calcoli (default)",
+      "keywords_presenti": [],
+      "logica": "DEFAULT",
+      "convertibile": "SI",
+      "affidabilita": "ALTA"
+    }
+  ],
+  "proc_sql": [
+    {
+      "nome_regola": "SQL dinamico con macro o call execute",
+      "keywords_presenti": ["%str", "%nrstr", "%sysfunc", "%eval", "\\bcall\\s+execute\\b"],
+      "logica": "ANY",
+      "convertibile": "NO",
+      "affidabilita": "BASSA"
+    },
+    {
+      "nome_regola": "INTO (creazione macro variables)",
+      "keywords_presenti": ["\\binto\\b"],
+      "logica": "ANY",
+      "convertibile": "SI",
+      "affidabilita": "MEDIA"
+    },
+    {
+      "nome_regola": "SELECT/WHERE/JOIN base (default)",
+      "keywords_presenti": [],
+      "logica": "DEFAULT",
+      "convertibile": "SI",
+      "affidabilita": "ALTA"
+    }
+  ],
+  "proc_sort": [
+    {
+      "nome_regola": "Sempre convertibile (default)",
+      "keywords_presenti": [],
+      "logica": "DEFAULT",
+      "convertibile": "SI",
+      "affidabilita": "ALTA"
+    }
+  ],
+  "proc_append": [
+    {
+      "nome_regola": "Sempre convertibile (default)",
+      "keywords_presenti": [],
+      "logica": "DEFAULT",
+      "convertibile": "SI",
+      "affidabilita": "ALTA"
+    }
+  ],
+  "proc_dataset": [
+    {
+      "nome_regola": "Gestione datasets (default)",
+      "keywords_presenti": [],
+      "logica": "DEFAULT",
+      "convertibile": "SI",
+      "affidabilita": "MEDIA"
+    }
+  ],
+  "ifdo": [
+    {
+      "nome_regola": "Struttura di controllo IF (default)",
+      "keywords_presenti": [],
+      "logica": "DEFAULT",
+      "convertibile": "SI",
+      "affidabilita": "MEDIA"
+    }
+  ],
+  "elsedo": [
+    {
+      "nome_regola": "Struttura di controllo ELSE (default)",
+      "keywords_presenti": [],
+      "logica": "DEFAULT",
+      "convertibile": "SI",
+      "affidabilita": "MEDIA"
+    }
+  ],
+  "macro": [
+    {
+      "nome_regola": "Logica complessa (symputx/call execute/resolve)",
+      "keywords_presenti": ["\\bsymputx?\\b", "\\bcall\\s+execute\\b", "\\bresolve\\b"],
+      "logica": "ANY",
+      "convertibile": "NO",
+      "affidabilita": "BASSA"
+    },
+    {
+      "nome_regola": "Troppi riferimenti a macro variables (>15)",
+      "keywords_presenti": ["&\\w+\\.?"],
+      "logica": "COUNT_GT_15",
+      "convertibile": "NO",
+      "affidabilita": "BASSA"
+    },
+    {
+      "nome_regola": "Wrapper semplice (default)",
+      "keywords_presenti": [],
+      "logica": "DEFAULT",
+      "convertibile": "SI",
+      "affidabilita": "MEDIA"
+    }
+  ],
+  "run_macro": [
+    {
+      "nome_regola": "Chiamata macro - convertibile come funzione Python",
+      "keywords_presenti": [],
+      "logica": "DEFAULT",
+      "convertibile": "SI",
+      "affidabilita": "BASSA"
+    }
+  ],
+  "include": [
+    {
+      "nome_regola": "File esterno - contenuto sconosciuto (default)",
+      "keywords_presenti": [],
+      "logica": "DEFAULT",
+      "convertibile": "NO",
+      "affidabilita": "BASSA"
+    }
+  ]
+}

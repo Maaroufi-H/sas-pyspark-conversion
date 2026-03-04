@@ -1,0 +1,290 @@
+[
+  {
+    "uid": "966ddd117e316fed:include:1:d9d6965f77b9b81d",
+    "tipo": "include_1",
+    "macro_categoria": "INCLUDE",
+    "linea_start": 1,
+    "linea_stop": 1,
+    "chiuso": true,
+    "depth": 0,
+    "convertibile_auto": "NO",
+    "affidabilita_auto": "BASSA",
+    "testo": "%include \"/sas/staging/opt/sasop/pgm/SAS_standard/sascode/Poste_RAFA/autoexec.sas\";\n"
+  },
+  {
+    "uid": "966ddd117e316fed:macro:3:d97b04b6576f458a",
+    "tipo": "macro_import(flusso);_2",
+    "macro_categoria": "MACRO_DEF",
+    "linea_start": 3,
+    "linea_stop": 112,
+    "chiuso": true,
+    "depth": 0,
+    "convertibile_auto": "SI",
+    "affidabilita_auto": "MEDIA",
+    "testo": "%macro import(flusso);\n\n\t%if %sysfunc(exist(result.register)) = 0 %then %do;\n\n\t\tdata result.register;\n\t\tattrib computing_datetime length = 8 format = datetime26.; \n\t\tattrib fase length = $50;\n\t\tattrib msg_error length = $150;\n\t\tattrib tipo length = $32; \n\t\tattrib flusso length = $32;\n\t\tstop;\n\t\trun;\n\n\t%end;\n\ndata register;\n\tlength computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;\n\tcomputing_datetime = \"&timest_for.\"dt;\n\tfase = \"INIZIO: CARICAMENTO DATI.\";\n\tmsg_error = \"\";\n\ttipo = \"ACQUISIZIONE\";\n\tflusso = \"&flusso.\";\n\tformat computing_datetime datetime26.;\n\trun;\t\n\t\t\n\tproc append base=result.register data=register;\n\trun;\n\n\n\t%inc \"&path./source/Importa_metadati.sas\";\n\t%inc \"&path./source/Importa_liste.sas\";\n\n\n\t%inc \"&path./source/Acquisisci_flussi.sas\";\n\n\t%if &syscc > 4 %then %do;\n\n\t\toptions obs=max nosyntaxcheck;\n\n\t\t%mail_errore(import, flusso = &flusso);\n\t\t\n\t\t%if %sysfunc(exist(result.register)) = 0 %then %do;\n\n\t\t\tdata result.register;\n\t\t\tattrib computing_datetime length = 8 format = datetime26.; \n\t\t\tattrib fase length = $50;\n\t\t\tattrib msg_error length = $150;\n\t\t\tattrib tipo length = $32; \n\t\t\tattrib flusso length = $32;\n\t\t\tstop;\n\t\t\trun;\n\n\t\t%end;\n\n\t\tdata register;\n\t\tlength computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;\n\t\tcomputing_datetime = \"&timest_for.\"dt;\n\t\tfase = \"FINE: CARICAMENTO DATI.\";\n\t\tmsg_error = \"ERROR: errore durante il caricamento dei file.\";\n\t\ttipo = \"ACQUISIZIONE\";\n\t\tflusso = \"&flusso.\";\n\t\tformat computing_datetime datetime26.;\n\t\trun;\t\n\t\t\n\t\tproc append base=result.register data=register;\n\t\trun;\n\n\n\n\t%end;\n\n\t%if &syscc le 4 and &num_t > 0 %then %do;\n\n\t\t%mail_caricamento(&flusso.);\n\n\t\t%if %sysfunc(exist(result.register)) = 0 %then %do;\n\n\t\t\tdata result.register;\n\t\t\tattrib computing_datetime length = 8 format = datetime26.; \n\t\t\tattrib fase length = $50;\n\t\t\tattrib msg_error length = $150;\n\t\t\tattrib tipo length = $32; \n\t\t\tattrib flusso length = $32;\n\t\t\tstop;\n\t\t\trun;\n\n\t\t%end;\n\n\t\tdata register;\n\t\tlength computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;\n\t\tcomputing_datetime = \"&timest_for.\"dt;\n\t\tfase = \"FINE: CARICAMENTO DATI.\";\n\t\tmsg_error = \"\";\n\t\ttipo = \"ACQUISIZIONE\";\n\t\tflusso = \"&flusso.\";\n\t\tformat computing_datetime datetime26.;\n\t\trun;\t\n\t\t\n\t\tproc append base=result.register data=register;\n\t\trun;\n\n\t\t%inc \"&path./source/aggrega_flussi.sas\";\n\n\t%end;\n\n\tproc datasets lib = work nolist kill;\n\trun;\n\tquit;\n\n%mend;\n",
+    "children": [
+      {
+        "uid": "966ddd117e316fed:ifdo:5:faaae7adf80a0950",
+        "tipo": "ifdo_3",
+        "macro_categoria": "IF_BLOCK",
+        "linea_start": 5,
+        "linea_stop": 16,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "MEDIA",
+        "testo": "\t%if %sysfunc(exist(result.register)) = 0 %then %do;\n\n\t\tdata result.register;\n\t\tattrib computing_datetime length = 8 format = datetime26.; \n\t\tattrib fase length = $50;\n\t\tattrib msg_error length = $150;\n\t\tattrib tipo length = $32; \n\t\tattrib flusso length = $32;\n\t\tstop;\n\t\trun;\n\n\t%end;\n",
+        "children": [
+          {
+            "uid": "966ddd117e316fed:data:7:94c9236c740ca708",
+            "tipo": "data_result.register_23",
+            "macro_categoria": "DATA_STEP",
+            "linea_start": 7,
+            "linea_stop": 14,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "ALTA",
+            "testo": "\t\tdata result.register;\n\t\tattrib computing_datetime length = 8 format = datetime26.; \n\t\tattrib fase length = $50;\n\t\tattrib msg_error length = $150;\n\t\tattrib tipo length = $32; \n\t\tattrib flusso length = $32;\n\t\tstop;\n\t\trun;\n"
+          }
+        ]
+      },
+      {
+        "uid": "966ddd117e316fed:data:18:02681e43b0e78525",
+        "tipo": "data_register_4",
+        "macro_categoria": "DATA_STEP",
+        "linea_start": 18,
+        "linea_stop": 26,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "ALTA",
+        "testo": "data register;\n\tlength computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;\n\tcomputing_datetime = \"&timest_for.\"dt;\n\tfase = \"INIZIO: CARICAMENTO DATI.\";\n\tmsg_error = \"\";\n\ttipo = \"ACQUISIZIONE\";\n\tflusso = \"&flusso.\";\n\tformat computing_datetime datetime26.;\n\trun;\t\n"
+      },
+      {
+        "uid": "966ddd117e316fed:proc_append:28:c39555438ed11aac",
+        "tipo": "proc_append_append_5",
+        "macro_categoria": "PROC_APPEND",
+        "linea_start": 28,
+        "linea_stop": 29,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "ALTA",
+        "testo": "\tproc append base=result.register data=register;\n\trun;\n"
+      },
+      {
+        "uid": "966ddd117e316fed:include:32:925e1ad2f4eaadbc",
+        "tipo": "include_6",
+        "macro_categoria": "INCLUDE",
+        "linea_start": 32,
+        "linea_stop": 32,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "NO",
+        "affidabilita_auto": "BASSA",
+        "testo": "\t%inc \"&path./source/Importa_metadati.sas\";\n"
+      },
+      {
+        "uid": "966ddd117e316fed:include:33:398911f6926293ec",
+        "tipo": "include_7",
+        "macro_categoria": "INCLUDE",
+        "linea_start": 33,
+        "linea_stop": 33,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "NO",
+        "affidabilita_auto": "BASSA",
+        "testo": "\t%inc \"&path./source/Importa_liste.sas\";\n"
+      },
+      {
+        "uid": "966ddd117e316fed:include:36:04a0fcb20a82e33f",
+        "tipo": "include_8",
+        "macro_categoria": "INCLUDE",
+        "linea_start": 36,
+        "linea_stop": 36,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "NO",
+        "affidabilita_auto": "BASSA",
+        "testo": "\t%inc \"&path./source/Acquisisci_flussi.sas\";\n"
+      },
+      {
+        "uid": "966ddd117e316fed:ifdo:38:aef5af899ee0be19",
+        "tipo": "ifdo_9",
+        "macro_categoria": "IF_BLOCK",
+        "linea_start": 38,
+        "linea_stop": 72,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "MEDIA",
+        "testo": "\t%if &syscc > 4 %then %do;\n\n\t\toptions obs=max nosyntaxcheck;\n\n\t\t%mail_errore(import, flusso = &flusso);\n\t\t\n\t\t%if %sysfunc(exist(result.register)) = 0 %then %do;\n\n\t\t\tdata result.register;\n\t\t\tattrib computing_datetime length = 8 format = datetime26.; \n\t\t\tattrib fase length = $50;\n\t\t\tattrib msg_error length = $150;\n\t\t\tattrib tipo length = $32; \n\t\t\tattrib flusso length = $32;\n\t\t\tstop;\n\t\t\trun;\n\n\t\t%end;\n\n\t\tdata register;\n\t\tlength computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;\n\t\tcomputing_datetime = \"&timest_for.\"dt;\n\t\tfase = \"FINE: CARICAMENTO DATI.\";\n\t\tmsg_error = \"ERROR: errore durante il caricamento dei file.\";\n\t\ttipo = \"ACQUISIZIONE\";\n\t\tflusso = \"&flusso.\";\n\t\tformat computing_datetime datetime26.;\n\t\trun;\t\n\t\t\n\t\tproc append base=result.register data=register;\n\t\trun;\n\n\n\n\t%end;\n",
+        "children": [
+          {
+            "uid": "966ddd117e316fed:run_macro:42:99da4b65571c2cd2",
+            "tipo": "runmacro_18",
+            "macro_categoria": "MACRO_CALL",
+            "linea_start": 42,
+            "linea_stop": 42,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "NO",
+            "affidabilita_auto": "BASSA",
+            "testo": "\t\t%mail_errore(import, flusso = &flusso);\n"
+          },
+          {
+            "uid": "966ddd117e316fed:ifdo:44:a7523f1c8bbefa58",
+            "tipo": "ifdo_19",
+            "macro_categoria": "IF_BLOCK",
+            "linea_start": 44,
+            "linea_stop": 55,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "MEDIA",
+            "testo": "\t\t%if %sysfunc(exist(result.register)) = 0 %then %do;\n\n\t\t\tdata result.register;\n\t\t\tattrib computing_datetime length = 8 format = datetime26.; \n\t\t\tattrib fase length = $50;\n\t\t\tattrib msg_error length = $150;\n\t\t\tattrib tipo length = $32; \n\t\t\tattrib flusso length = $32;\n\t\t\tstop;\n\t\t\trun;\n\n\t\t%end;\n",
+            "children": [
+              {
+                "uid": "966ddd117e316fed:data:46:a4d72b26e90494ec",
+                "tipo": "data_result.register_22",
+                "macro_categoria": "DATA_STEP",
+                "linea_start": 46,
+                "linea_stop": 53,
+                "chiuso": true,
+                "depth": 3,
+                "convertibile_auto": "SI",
+                "affidabilita_auto": "ALTA",
+                "testo": "\t\t\tdata result.register;\n\t\t\tattrib computing_datetime length = 8 format = datetime26.; \n\t\t\tattrib fase length = $50;\n\t\t\tattrib msg_error length = $150;\n\t\t\tattrib tipo length = $32; \n\t\t\tattrib flusso length = $32;\n\t\t\tstop;\n\t\t\trun;\n"
+              }
+            ]
+          },
+          {
+            "uid": "966ddd117e316fed:data:57:7180e6e7336dca13",
+            "tipo": "data_register_20",
+            "macro_categoria": "DATA_STEP",
+            "linea_start": 57,
+            "linea_stop": 65,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "ALTA",
+            "testo": "\t\tdata register;\n\t\tlength computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;\n\t\tcomputing_datetime = \"&timest_for.\"dt;\n\t\tfase = \"FINE: CARICAMENTO DATI.\";\n\t\tmsg_error = \"ERROR: errore durante il caricamento dei file.\";\n\t\ttipo = \"ACQUISIZIONE\";\n\t\tflusso = \"&flusso.\";\n\t\tformat computing_datetime datetime26.;\n\t\trun;\t\n"
+          },
+          {
+            "uid": "966ddd117e316fed:proc_append:67:ce0a1a0eec3f2fe8",
+            "tipo": "proc_append_append_21",
+            "macro_categoria": "PROC_APPEND",
+            "linea_start": 67,
+            "linea_stop": 68,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "ALTA",
+            "testo": "\t\tproc append base=result.register data=register;\n\t\trun;\n"
+          }
+        ]
+      },
+      {
+        "uid": "966ddd117e316fed:ifdo:74:6ee8066adca0d772",
+        "tipo": "ifdo_10",
+        "macro_categoria": "IF_BLOCK",
+        "linea_start": 74,
+        "linea_stop": 106,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "MEDIA",
+        "testo": "\t%if &syscc le 4 and &num_t > 0 %then %do;\n\n\t\t%mail_caricamento(&flusso.);\n\n\t\t%if %sysfunc(exist(result.register)) = 0 %then %do;\n\n\t\t\tdata result.register;\n\t\t\tattrib computing_datetime length = 8 format = datetime26.; \n\t\t\tattrib fase length = $50;\n\t\t\tattrib msg_error length = $150;\n\t\t\tattrib tipo length = $32; \n\t\t\tattrib flusso length = $32;\n\t\t\tstop;\n\t\t\trun;\n\n\t\t%end;\n\n\t\tdata register;\n\t\tlength computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;\n\t\tcomputing_datetime = \"&timest_for.\"dt;\n\t\tfase = \"FINE: CARICAMENTO DATI.\";\n\t\tmsg_error = \"\";\n\t\ttipo = \"ACQUISIZIONE\";\n\t\tflusso = \"&flusso.\";\n\t\tformat computing_datetime datetime26.;\n\t\trun;\t\n\t\t\n\t\tproc append base=result.register data=register;\n\t\trun;\n\n\t\t%inc \"&path./source/aggrega_flussi.sas\";\n\n\t%end;\n",
+        "children": [
+          {
+            "uid": "966ddd117e316fed:run_macro:76:c3c78c5d68273f2a",
+            "tipo": "runmacro_12",
+            "macro_categoria": "MACRO_CALL",
+            "linea_start": 76,
+            "linea_stop": 76,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "NO",
+            "affidabilita_auto": "BASSA",
+            "testo": "\t\t%mail_caricamento(&flusso.);\n"
+          },
+          {
+            "uid": "966ddd117e316fed:ifdo:78:a7523f1c8bbefa58",
+            "tipo": "ifdo_13",
+            "macro_categoria": "IF_BLOCK",
+            "linea_start": 78,
+            "linea_stop": 89,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "MEDIA",
+            "testo": "\t\t%if %sysfunc(exist(result.register)) = 0 %then %do;\n\n\t\t\tdata result.register;\n\t\t\tattrib computing_datetime length = 8 format = datetime26.; \n\t\t\tattrib fase length = $50;\n\t\t\tattrib msg_error length = $150;\n\t\t\tattrib tipo length = $32; \n\t\t\tattrib flusso length = $32;\n\t\t\tstop;\n\t\t\trun;\n\n\t\t%end;\n",
+            "children": [
+              {
+                "uid": "966ddd117e316fed:data:80:a4d72b26e90494ec",
+                "tipo": "data_result.register_17",
+                "macro_categoria": "DATA_STEP",
+                "linea_start": 80,
+                "linea_stop": 87,
+                "chiuso": true,
+                "depth": 3,
+                "convertibile_auto": "SI",
+                "affidabilita_auto": "ALTA",
+                "testo": "\t\t\tdata result.register;\n\t\t\tattrib computing_datetime length = 8 format = datetime26.; \n\t\t\tattrib fase length = $50;\n\t\t\tattrib msg_error length = $150;\n\t\t\tattrib tipo length = $32; \n\t\t\tattrib flusso length = $32;\n\t\t\tstop;\n\t\t\trun;\n"
+              }
+            ]
+          },
+          {
+            "uid": "966ddd117e316fed:data:91:2087f7dd41eca8f9",
+            "tipo": "data_register_14",
+            "macro_categoria": "DATA_STEP",
+            "linea_start": 91,
+            "linea_stop": 99,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "ALTA",
+            "testo": "\t\tdata register;\n\t\tlength computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;\n\t\tcomputing_datetime = \"&timest_for.\"dt;\n\t\tfase = \"FINE: CARICAMENTO DATI.\";\n\t\tmsg_error = \"\";\n\t\ttipo = \"ACQUISIZIONE\";\n\t\tflusso = \"&flusso.\";\n\t\tformat computing_datetime datetime26.;\n\t\trun;\t\n"
+          },
+          {
+            "uid": "966ddd117e316fed:proc_append:101:ce0a1a0eec3f2fe8",
+            "tipo": "proc_append_append_15",
+            "macro_categoria": "PROC_APPEND",
+            "linea_start": 101,
+            "linea_stop": 102,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "ALTA",
+            "testo": "\t\tproc append base=result.register data=register;\n\t\trun;\n"
+          },
+          {
+            "uid": "966ddd117e316fed:include:104:541199f3157391a2",
+            "tipo": "include_16",
+            "macro_categoria": "INCLUDE",
+            "linea_start": 104,
+            "linea_stop": 104,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "NO",
+            "affidabilita_auto": "BASSA",
+            "testo": "\t\t%inc \"&path./source/aggrega_flussi.sas\";\n"
+          }
+        ]
+      },
+      {
+        "uid": "966ddd117e316fed:proc_dataset:108:2485778f1b460f59",
+        "tipo": "proc_dataset_datasets_11",
+        "macro_categoria": "PROC_DATASETS",
+        "linea_start": 108,
+        "linea_stop": 109,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "MEDIA",
+        "testo": "\tproc datasets lib = work nolist kill;\n\trun;\n"
+      }
+    ]
+  }
+]

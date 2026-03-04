@@ -1,0 +1,332 @@
+REGISTRE DES REGLES DU PARSER
+================================================================================
+ blocco                      regex_start                      regex_end  bilanciato                                                    commento    stato  regex_modificata                     regex_precedente                                                                        motivo_modifica
+   data                       ^\s*data\b                ^\s*run\s*;\s*$       False         Blocco DATA step SAS. Crea/legge/trasforma dataset.       OK             False                                 None                                                                                   None
+   proc                       ^\s*proc\b         ^\s*(run|quit)\s*;\s*$       False   Blocco PROC generico (append, sort, sql, datasets, ecc.).       OK             False                                 None                                                                                   None
+  macro                     ^\s*%macro\b ^\s*%mend\b(?:\s+\w+)?\s*;\s*$        True   Definizione %macro con nesting bilanciato (%macro/%mend).       OK             False                                 None                                                                                   None
+   ifdo ^\s*%if\b.*?%then\s+%do\s*;?\s*$              ^\s*%end\s*;?\s*$        True Blocco %if ... %then %do con nesting bilanciato (%do/%end). CORRETTO              True ^\s*%if\b.*?\b%then\b\s*%do\s*;?\s*$ FIX 1: rimosso \b prima di %then. spazio + % = non-word/non-word, \b non matchava mai.
+ elsedo         ^\s*%else\s+%do\s*;?\s*$              ^\s*%end\s*;?\s*$        True         Blocco %else %do con nesting bilanciato (%do/%end). CORRETTO              True           ^\s*%else\b\s*%do\s*;?\s*$                   FIX 2: rimosso \b dopo %else. Stesso problema word boundary di ifdo.
+include                ^\s*%inc(lude)?\b                      ^\s*;\s*$       False   Istruzione %include / %inc (inclusione file SAS esterni). CORRETTO              True                       ^\s*%include\b                         FIX 3: aggiunto supporto per %inc (abbreviazione di %include).
+
+BLOCCHI TROVATI
+================================================================================
+
+=== include:1 | depth=0 | parent=(racine) | regola=include [CORRETTO] | Istruzione %include / %inc (inclusione file SAS esterni). ===
+%include "/sas/staging/opt/sasop/pgm/SAS_standard/sascode/Poste_RAFA/autoexec.sas";
+
+=== macro:3 | depth=0 | parent=(racine) | regola=macro [OK] | Definizione %macro con nesting bilanciato (%macro/%mend). ===
+%macro import(flusso);
+
+	%if %sysfunc(exist(result.register)) = 0 %then %do;
+
+		data result.register;
+		attrib computing_datetime length = 8 format = datetime26.; 
+		attrib fase length = $50;
+		attrib msg_error length = $150;
+		attrib tipo length = $32; 
+		attrib flusso length = $32;
+		stop;
+		run;
+
+	%end;
+
+data register;
+	length computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;
+	computing_datetime = "&timest_for."dt;
+	fase = "INIZIO: CARICAMENTO DATI.";
+	msg_error = "";
+	tipo = "ACQUISIZIONE";
+	flusso = "&flusso.";
+	format computing_datetime datetime26.;
+	run;	
+		
+	proc append base=result.register data=register;
+	run;
+
+
+	%inc "&path./source/Importa_metadati.sas";
+	%inc "&path./source/Importa_liste.sas";
+
+
+	%inc "&path./source/Acquisisci_flussi.sas";
+
+	%if &syscc > 4 %then %do;
+
+		options obs=max nosyntaxcheck;
+
+		%mail_errore(import, flusso = &flusso);
+		
+		%if %sysfunc(exist(result.register)) = 0 %then %do;
+
+			data result.register;
+			attrib computing_datetime length = 8 format = datetime26.; 
+			attrib fase length = $50;
+			attrib msg_error length = $150;
+			attrib tipo length = $32; 
+			attrib flusso length = $32;
+			stop;
+			run;
+
+		%end;
+
+		data register;
+		length computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;
+		computing_datetime = "&timest_for."dt;
+		fase = "FINE: CARICAMENTO DATI.";
+		msg_error = "ERROR: errore durante il caricamento dei file.";
+		tipo = "ACQUISIZIONE";
+		flusso = "&flusso.";
+		format computing_datetime datetime26.;
+		run;	
+		
+		proc append base=result.register data=register;
+		run;
+
+
+
+	%end;
+
+	%if &syscc le 4 and &num_t > 0 %then %do;
+
+		%mail_caricamento(&flusso.);
+
+		%if %sysfunc(exist(result.register)) = 0 %then %do;
+
+			data result.register;
+			attrib computing_datetime length = 8 format = datetime26.; 
+			attrib fase length = $50;
+			attrib msg_error length = $150;
+			attrib tipo length = $32; 
+			attrib flusso length = $32;
+			stop;
+			run;
+
+		%end;
+
+		data register;
+		length computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;
+		computing_datetime = "&timest_for."dt;
+		fase = "FINE: CARICAMENTO DATI.";
+		msg_error = "";
+		tipo = "ACQUISIZIONE";
+		flusso = "&flusso.";
+		format computing_datetime datetime26.;
+		run;	
+		
+		proc append base=result.register data=register;
+		run;
+
+		%inc "&path./source/aggrega_flussi.sas";
+
+	%end;
+
+	proc datasets lib = work nolist kill;
+	run;
+	quit;
+
+%mend;
+
+=== ifdo:5 | depth=1 | parent=macro:3 | regola=ifdo [CORRETTO] | Blocco %if ... %then %do con nesting bilanciato (%do/%end). ===
+	%if %sysfunc(exist(result.register)) = 0 %then %do;
+
+		data result.register;
+		attrib computing_datetime length = 8 format = datetime26.; 
+		attrib fase length = $50;
+		attrib msg_error length = $150;
+		attrib tipo length = $32; 
+		attrib flusso length = $32;
+		stop;
+		run;
+
+	%end;
+
+=== data:18 | depth=1 | parent=macro:3 | regola=data [OK] | Blocco DATA step SAS. Crea/legge/trasforma dataset. ===
+data register;
+	length computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;
+	computing_datetime = "&timest_for."dt;
+	fase = "INIZIO: CARICAMENTO DATI.";
+	msg_error = "";
+	tipo = "ACQUISIZIONE";
+	flusso = "&flusso.";
+	format computing_datetime datetime26.;
+	run;	
+
+=== proc:28 | depth=1 | parent=macro:3 | regola=proc [OK] | Blocco PROC generico (append, sort, sql, datasets, ecc.). ===
+	proc append base=result.register data=register;
+	run;
+
+=== include:32 | depth=1 | parent=macro:3 | regola=include [CORRETTO] | Istruzione %include / %inc (inclusione file SAS esterni). ===
+	%inc "&path./source/Importa_metadati.sas";
+
+=== include:33 | depth=1 | parent=macro:3 | regola=include [CORRETTO] | Istruzione %include / %inc (inclusione file SAS esterni). ===
+	%inc "&path./source/Importa_liste.sas";
+
+=== include:36 | depth=1 | parent=macro:3 | regola=include [CORRETTO] | Istruzione %include / %inc (inclusione file SAS esterni). ===
+	%inc "&path./source/Acquisisci_flussi.sas";
+
+=== ifdo:38 | depth=1 | parent=macro:3 | regola=ifdo [CORRETTO] | Blocco %if ... %then %do con nesting bilanciato (%do/%end). ===
+	%if &syscc > 4 %then %do;
+
+		options obs=max nosyntaxcheck;
+
+		%mail_errore(import, flusso = &flusso);
+		
+		%if %sysfunc(exist(result.register)) = 0 %then %do;
+
+			data result.register;
+			attrib computing_datetime length = 8 format = datetime26.; 
+			attrib fase length = $50;
+			attrib msg_error length = $150;
+			attrib tipo length = $32; 
+			attrib flusso length = $32;
+			stop;
+			run;
+
+		%end;
+
+		data register;
+		length computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;
+		computing_datetime = "&timest_for."dt;
+		fase = "FINE: CARICAMENTO DATI.";
+		msg_error = "ERROR: errore durante il caricamento dei file.";
+		tipo = "ACQUISIZIONE";
+		flusso = "&flusso.";
+		format computing_datetime datetime26.;
+		run;	
+		
+		proc append base=result.register data=register;
+		run;
+
+
+
+	%end;
+
+=== ifdo:74 | depth=1 | parent=macro:3 | regola=ifdo [CORRETTO] | Blocco %if ... %then %do con nesting bilanciato (%do/%end). ===
+	%if &syscc le 4 and &num_t > 0 %then %do;
+
+		%mail_caricamento(&flusso.);
+
+		%if %sysfunc(exist(result.register)) = 0 %then %do;
+
+			data result.register;
+			attrib computing_datetime length = 8 format = datetime26.; 
+			attrib fase length = $50;
+			attrib msg_error length = $150;
+			attrib tipo length = $32; 
+			attrib flusso length = $32;
+			stop;
+			run;
+
+		%end;
+
+		data register;
+		length computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;
+		computing_datetime = "&timest_for."dt;
+		fase = "FINE: CARICAMENTO DATI.";
+		msg_error = "";
+		tipo = "ACQUISIZIONE";
+		flusso = "&flusso.";
+		format computing_datetime datetime26.;
+		run;	
+		
+		proc append base=result.register data=register;
+		run;
+
+		%inc "&path./source/aggrega_flussi.sas";
+
+	%end;
+
+=== proc:108 | depth=1 | parent=macro:3 | regola=proc [OK] | Blocco PROC generico (append, sort, sql, datasets, ecc.). ===
+	proc datasets lib = work nolist kill;
+	run;
+
+=== ifdo:78 | depth=2 | parent=ifdo:74 | regola=ifdo [CORRETTO] | Blocco %if ... %then %do con nesting bilanciato (%do/%end). ===
+		%if %sysfunc(exist(result.register)) = 0 %then %do;
+
+			data result.register;
+			attrib computing_datetime length = 8 format = datetime26.; 
+			attrib fase length = $50;
+			attrib msg_error length = $150;
+			attrib tipo length = $32; 
+			attrib flusso length = $32;
+			stop;
+			run;
+
+		%end;
+
+=== data:91 | depth=2 | parent=ifdo:74 | regola=data [OK] | Blocco DATA step SAS. Crea/legge/trasforma dataset. ===
+		data register;
+		length computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;
+		computing_datetime = "&timest_for."dt;
+		fase = "FINE: CARICAMENTO DATI.";
+		msg_error = "";
+		tipo = "ACQUISIZIONE";
+		flusso = "&flusso.";
+		format computing_datetime datetime26.;
+		run;	
+
+=== proc:101 | depth=2 | parent=ifdo:74 | regola=proc [OK] | Blocco PROC generico (append, sort, sql, datasets, ecc.). ===
+		proc append base=result.register data=register;
+		run;
+
+=== include:104 | depth=2 | parent=ifdo:74 | regola=include [CORRETTO] | Istruzione %include / %inc (inclusione file SAS esterni). ===
+		%inc "&path./source/aggrega_flussi.sas";
+
+=== data:80 | depth=3 | parent=ifdo:78 | regola=data [OK] | Blocco DATA step SAS. Crea/legge/trasforma dataset. ===
+			data result.register;
+			attrib computing_datetime length = 8 format = datetime26.; 
+			attrib fase length = $50;
+			attrib msg_error length = $150;
+			attrib tipo length = $32; 
+			attrib flusso length = $32;
+			stop;
+			run;
+
+=== ifdo:44 | depth=2 | parent=ifdo:38 | regola=ifdo [CORRETTO] | Blocco %if ... %then %do con nesting bilanciato (%do/%end). ===
+		%if %sysfunc(exist(result.register)) = 0 %then %do;
+
+			data result.register;
+			attrib computing_datetime length = 8 format = datetime26.; 
+			attrib fase length = $50;
+			attrib msg_error length = $150;
+			attrib tipo length = $32; 
+			attrib flusso length = $32;
+			stop;
+			run;
+
+		%end;
+
+=== data:57 | depth=2 | parent=ifdo:38 | regola=data [OK] | Blocco DATA step SAS. Crea/legge/trasforma dataset. ===
+		data register;
+		length computing_datetime 8 fase $50 msg_error $150 tipo $32 flusso $32;
+		computing_datetime = "&timest_for."dt;
+		fase = "FINE: CARICAMENTO DATI.";
+		msg_error = "ERROR: errore durante il caricamento dei file.";
+		tipo = "ACQUISIZIONE";
+		flusso = "&flusso.";
+		format computing_datetime datetime26.;
+		run;	
+
+=== proc:67 | depth=2 | parent=ifdo:38 | regola=proc [OK] | Blocco PROC generico (append, sort, sql, datasets, ecc.). ===
+		proc append base=result.register data=register;
+		run;
+
+=== data:46 | depth=3 | parent=ifdo:44 | regola=data [OK] | Blocco DATA step SAS. Crea/legge/trasforma dataset. ===
+			data result.register;
+			attrib computing_datetime length = 8 format = datetime26.; 
+			attrib fase length = $50;
+			attrib msg_error length = $150;
+			attrib tipo length = $32; 
+			attrib flusso length = $32;
+			stop;
+			run;
+
+=== data:7 | depth=2 | parent=ifdo:5 | regola=data [OK] | Blocco DATA step SAS. Crea/legge/trasforma dataset. ===
+		data result.register;
+		attrib computing_datetime length = 8 format = datetime26.; 
+		attrib fase length = $50;
+		attrib msg_error length = $150;
+		attrib tipo length = $32; 
+		attrib flusso length = $32;
+		stop;
+		run;
