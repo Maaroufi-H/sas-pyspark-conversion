@@ -452,65 +452,295 @@ class AnonymizedCloudConverter:
 # FACTORY – SCEGLIE AUTOMATICAMENTE LA STRATEGIA
 # ═══════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════
+# STRATEGIA C : CODESTRAL / MISTRAL API (OpenAI-compatible endpoint)
+# ═══════════════════════════════════════════════════════════════════════
+
+class CodestralConverter:
+    """
+    Convertitore via API OpenAI-compatible (Codestral, Mistral, vLLM, llama.cpp).
+    Funziona con qualsiasi server che espone /v1/chat/completions.
+
+    Esempi di endpoint:
+      - Codestral cloud Mistral  : https://codestral.mistral.ai/v1
+      - Cloud privato vLLM       : http://mon-serveur:8080/v1
+      - Cloud privato llama.cpp  : http://mon-serveur:8081/v1
+      - Ollama (OpenAI compat)   : http://mon-serveur:11434/v1
+
+    Modelli Codestral consigliati:
+      - codestral-latest         (migliore per il codice, ~22B)
+      - mistral-large-latest     (generico ma potente)
+      - open-codestral-mamba     (leggero, veloce)
+    """
+
+    def __init__(
+        self,
+        host: str = "http://localhost:8080/v1",
+        api_key: str = "not-needed",          # molti server privati non richiedono auth
+        model: str = "codestral-latest",
+        learning_db_path: str = "learning_db.jsonl",
+        temperature: float = 0.1,
+        max_tokens: int = 2048,
+        timeout: int = 120,
+    ):
+        self.host        = host.rstrip("/")
+        self.api_key     = api_key
+        self.model       = model
+        self.db_path     = Path(learning_db_path)
+        self.temperature = temperature
+        self.max_tokens  = max_tokens
+        self.timeout     = timeout
+        self._examples: List[dict] = self._load_few_shots()
+
+    def is_available(self) -> bool:
+        """Verifica che il server risponda (GET /v1/models o ping base)."""
+        try:
+            url = f"{self.host}/models"
+            req = urllib.request.Request(
+                url,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                method="GET",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+
+    def convert(
+        self,
+        sas_code: str,
+        parent_context: str = "",
+        block_category: str = "",
+    ) -> Optional[str]:
+        """Invia il blocco SAS al modello e restituisce il PySpark."""
+        messages = self._build_messages(sas_code, parent_context, block_category)
+
+        payload = json.dumps({
+            "model":       self.model,
+            "messages":    messages,
+            "temperature": self.temperature,
+            "max_tokens":  self.max_tokens,
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            f"{self.host}/chat/completions",
+            data=payload,
+            headers={
+                "Content-Type":  "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                result = json.loads(resp.read())
+                text = result["choices"][0]["message"]["content"].strip()
+                # Rimuove eventuali blocchi markdown ```python ... ```
+                text = re.sub(r"^```(?:python)?\n?", "", text)
+                text = re.sub(r"\n?```$", "", text)
+                return text.strip()
+        except urllib.error.URLError as e:
+            print(f"[CodestralConverter] Errore di rete: {e}")
+            return None
+
+    def _build_messages(
+        self,
+        sas_code: str,
+        parent_context: str,
+        block_category: str,
+    ) -> List[dict]:
+        """Costruisce la lista di messaggi con few-shot examples."""
+        msgs: List[dict] = [{"role": "system", "content": _SYSTEM_PROMPT_SAS}]
+
+        # Few-shot examples dalle correzioni umane
+        for ex in self._examples[-4:]:
+            msgs.append({"role": "user",      "content": f"```sas\n{ex['sas_input']}\n```"})
+            msgs.append({"role": "assistant", "content": ex["corrected"]})
+
+        # Richiesta corrente
+        user_content = ""
+        if parent_context:
+            user_content += f"Context: {parent_context}\n"
+        if block_category:
+            user_content += f"Block type: {block_category}\n"
+        user_content += f"```sas\n{sas_code}\n```"
+        msgs.append({"role": "user", "content": user_content})
+        return msgs
+
+    def record_correction(
+        self,
+        sas_code: str,
+        generated_py: str,
+        corrected_py: str,
+        block_category: str = "",
+    ) -> None:
+        """Registra una correzione manuale per il few-shot learning."""
+        entry = {
+            "sas_input":      sas_code,
+            "generated":      generated_py,
+            "corrected":      corrected_py,
+            "block_category": block_category,
+            "source":         "human_correction",
+        }
+        with open(self.db_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        self._examples = self._load_few_shots()
+        print(f"[Learning] Correzione registrata. Totale esempi: {len(self._examples)}")
+
+    def _load_few_shots(self) -> List[dict]:
+        if not self.db_path.exists():
+            return []
+        examples = []
+        with open(self.db_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if entry.get("source") == "human_correction":
+                        examples.append(entry)
+                except json.JSONDecodeError:
+                    pass
+        return examples
+
+    def export_finetuning_dataset(self, output_path: str) -> None:
+        """Esporta le correzioni in formato JSONL per il fine-tuning."""
+        data = self._load_few_shots()
+        with open(output_path, "w", encoding="utf-8") as f:
+            for entry in data:
+                ft_entry = {
+                    "instruction": _SYSTEM_PROMPT_SAS,
+                    "input":  entry["sas_input"],
+                    "output": entry["corrected"],
+                }
+                f.write(json.dumps(ft_entry, ensure_ascii=False) + "\n")
+        print(f"Dataset fine-tuning esportato: {output_path} ({len(data)} esempi)")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# CARICAMENTO DA FILE DI CONFIGURAZIONE
+# ═══════════════════════════════════════════════════════════════════════
+
+def load_config(config_path: str = "llm_config.json") -> dict:
+    """
+    Carica la configurazione LLM da llm_config.json.
+    Restituisce un dict vuoto se il file non esiste.
+    """
+    p = Path(config_path)
+    if not p.exists():
+        return {}
+    with open(p, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def create_llm_backend(
     strategy: str = "auto",
-    ollama_model: str = "deepseek-coder:6.7b",
+    ollama_model: str = "codestral",
     ollama_host: str = "http://localhost:11434",
+    codestral_host: str = "http://localhost:8080/v1",
+    codestral_api_key: str = "not-needed",
+    codestral_model: str = "codestral-latest",
     cloud_api_key: str = "",
     cloud_model: str = "claude-opus-4-6",
     learning_db: str = "learning_db.jsonl",
+    config_path: str = "llm_config.json",
 ):
     """
-    Crea il backend LLM più appropriato secondo la strategia scelta.
+    Crea il backend LLM secondo la strategia scelta.
+    Se esiste llm_config.json, i parametri vengono letti da li'
+    (i parametri espliciti hanno la precedenza sul file).
 
     strategy:
-      "local"  → Solo Ollama (consigliato in azienda)
-      "anon"   → Anonimizzatore + LLM cloud (sicuro ma cloud)
-      "auto"   → prova Ollama per primo, altrimenti fallback solo su regole
-      "none"   → nessun LLM (solo regole)
+      "ollama"     → Ollama locale o su cloud privato (API /api/generate)
+      "codestral"  → API OpenAI-compatible (Codestral, Mistral, vLLM, llama.cpp)
+      "anon"       → Anonimizzatore + Claude/OpenAI cloud pubblico
+      "auto"       → prova ollama, poi codestral, poi solo regole
+      "none"       → nessun LLM (solo regole deterministiche)
 
-    Esempio:
-        backend = create_llm_backend(strategy="local")
-        if backend:
-            py_code = backend.convert(sas_block, parent_context="inside macro")
+    Esempio con cloud privato Ollama:
+        backend = create_llm_backend(
+            strategy="ollama",
+            ollama_host="http://mon-serveur-prive:11434",
+            ollama_model="codestral",
+        )
+
+    Esempio con Codestral su cloud privato:
+        backend = create_llm_backend(
+            strategy="codestral",
+            codestral_host="http://mon-cloud:8080/v1",
+            codestral_model="codestral-latest",
+        )
     """
+    # Legge configurazione da file (i parametri espliciti hanno precedenza)
+    cfg = load_config(config_path)
+
+    if not strategy or strategy == "auto":
+        strategy = cfg.get("strategy", "auto")
+
+    ollama_host      = cfg.get("ollama", {}).get("host",  ollama_host)
+    ollama_model     = cfg.get("ollama", {}).get("model", ollama_model)
+    codestral_host   = cfg.get("codestral", {}).get("host",    codestral_host)
+    codestral_model  = cfg.get("codestral", {}).get("model",   codestral_model)
+    codestral_api_key= cfg.get("codestral", {}).get("api_key", codestral_api_key)
+
     if strategy == "none":
-        print("[LLM] Strategia 'none': LLM disabilitato, solo regole.")
+        print("[LLM] LLM disabilitato: solo regole deterministiche.")
         return None
 
-    if strategy in ("local", "auto"):
+    if strategy in ("ollama", "auto"):
         ollama = OllamaConverter(
             model=ollama_model,
             host=ollama_host,
             learning_db_path=learning_db,
         )
         if ollama.is_available():
-            print(f"[LLM] Ollama disponibile → modello {ollama_model} (locale, privato)")
+            print(f"[LLM] Ollama OK → {ollama_host} | modello: {ollama_model}")
             return ollama
-        elif strategy == "local":
+        elif strategy == "ollama":
             print(
-                f"[LLM] ATTENZIONE: Ollama non disponibile su {ollama_host}.\n"
-                f"  → Installare Ollama: https://ollama.com/download\n"
-                f"  → Poi: ollama pull {ollama_model}"
+                f"[LLM] ERRORE: Ollama non raggiungibile su {ollama_host}\n"
+                f"  Verifica che Ollama sia in esecuzione e che il modello sia disponibile:\n"
+                f"    ollama pull {ollama_model}\n"
+                f"  Se e' su un cloud privato, verifica la porta e il firewall."
+            )
+            return None
+
+    if strategy in ("codestral", "auto"):
+        coder = CodestralConverter(
+            host=codestral_host,
+            api_key=codestral_api_key,
+            model=codestral_model,
+            learning_db_path=learning_db,
+        )
+        if coder.is_available():
+            print(f"[LLM] Codestral OK → {codestral_host} | modello: {codestral_model}")
+            return coder
+        elif strategy == "codestral":
+            print(
+                f"[LLM] ERRORE: endpoint non raggiungibile su {codestral_host}\n"
+                f"  Verifica che il server sia attivo e che {codestral_host}/models risponda."
             )
             return None
         else:
-            print("[LLM] Ollama non disponibile → solo regole (fallback sicuro)")
+            print("[LLM] Nessun backend LLM disponibile → solo regole deterministiche.")
             return None
 
     if strategy == "anon":
         if not cloud_api_key:
             print("[LLM] La strategia 'anon' richiede cloud_api_key.")
             return None
-        print("[LLM] Strategia anonimizzata → codice SAS mascherato prima dell'invio al cloud")
+        print("[LLM] Strategia anon → codice SAS mascherato prima dell'invio al cloud")
         return AnonymizedCloudConverter(
             api_key=cloud_api_key,
             model=cloud_model,
             learning_db_path=learning_db,
         )
 
-    raise ValueError(f"Strategia sconosciuta: {strategy!r}. "
-                     f"Valori validi: 'local', 'anon', 'auto', 'none'")
+    raise ValueError(
+        f"Strategia sconosciuta: {strategy!r}. "
+        f"Valori validi: 'ollama', 'codestral', 'anon', 'auto', 'none'"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -43,6 +43,7 @@ class ConversionContext:
     available_dfs: Dict[str, str] = field(default_factory=dict) # sas_name → py_var
     function_name: Optional[str] = None  # nome della funzione Python corrente
     spark_session_var: str = "spark"     # nome della variabile SparkSession
+    llm_backend: object = None           # OllamaConverter | CodestralConverter | None
 
     # ── helpers ──────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ class ConversionContext:
             available_dfs=dict(self.available_dfs),
             function_name=self.function_name,
             spark_session_var=self.spark_session_var,
+            llm_backend=self.llm_backend,
         )
 
     @property
@@ -626,8 +628,41 @@ spark = SparkSession.builder.appName("sas_converted").getOrCreate()
 
 
 def _todo_block(blk: dict, ctx: ConversionContext, reason: str) -> str:
-    """Genera un commento TODO per i blocchi non convertibili."""
+    """
+    Genera un commento TODO per i blocchi non convertibili dalle regole.
+    Se ctx.llm_backend e' disponibile, tenta una conversione via LLM prima
+    di emettere il TODO — il blocco LLM viene marcato con un commento
+    '[LLM-generated]' per distinguerlo dal codice deterministico.
+    """
     pad = ctx.pad
+    sas_code = blk.get("testo", "")
+
+    # ── Tentativo LLM ──────────────────────────────────────────────
+    if ctx.llm_backend is not None and sas_code.strip():
+        category = blk.get("macro_categoria", "")
+        context_hint = ctx.function_name or ctx.parent_type or ""
+        try:
+            llm_result = ctx.llm_backend.convert(
+                sas_code=sas_code,
+                parent_context=context_hint,
+                block_category=category,
+            )
+            if llm_result and llm_result.strip():
+                # Indenta il codice LLM al livello corrente
+                indented = "\n".join(
+                    f"{pad}{line}" if line.strip() else line
+                    for line in llm_result.splitlines()
+                )
+                header = (
+                    f"{pad}# [LLM-generated] righe "
+                    f"{blk.get('linea_start')}–{blk.get('linea_stop')} "
+                    f"| {reason}"
+                )
+                return f"{header}\n{indented}"
+        except Exception as exc:
+            print(f"[LLM] Errore durante la conversione: {exc}")
+
+    # ── Fallback: commento TODO deterministico ─────────────────────
     lines = [
         f"{pad}# {'=' * 60}",
         f"{pad}# TODO: REVISIONE MANUALE NECESSARIA",
@@ -637,9 +672,9 @@ def _todo_block(blk: dict, ctx: ConversionContext, reason: str) -> str:
         f"{pad}# {'=' * 60}",
         f"{pad}# Codice SAS originale:",
     ]
-    for line in blk.get("testo", "").splitlines()[:30]:
+    for line in sas_code.splitlines()[:30]:
         lines.append(f"{pad}#   {line.rstrip()}")
-    if blk.get("testo", "").count('\n') > 30:
+    if sas_code.count('\n') > 30:
         lines.append(f"{pad}#   ... (troncato)")
     lines.append(f"{pad}# {'=' * 60}")
     return "\n".join(lines)
@@ -1250,19 +1285,30 @@ def convert_block_preview(uid: str, blocks: Dict[str, dict]) -> str:
         return f"# Errore conversione: {e}"
 
 
-def convert_blocks_to_map(blocks: Dict[str, dict]) -> Dict[str, str]:
+def convert_blocks_to_map(
+    blocks: Dict[str, dict],
+    llm_backend: object = None,
+) -> Dict[str, str]:
     """
     Converte tutti i blocchi in isolamento e restituisce
     un dizionario {uid: codice_pyspark} per popolare l'Excel.
+    Il llm_backend opzionale viene passato al ConversionContext.
     """
     return {uid: convert_block_preview(uid, blocks) for uid in blocks}
 
 
-def convert_tree(blocks: Dict[str, dict]) -> str:
+def convert_tree(
+    blocks: Dict[str, dict],
+    llm_backend: object = None,
+) -> str:
     """
     Punto di ingresso principale del pipeline completo.
     Riceve il dizionario di blocchi (da trova_sas3_tracker.py) e restituisce
     lo script PySpark completo come stringa.
+
+    llm_backend : istanza di OllamaConverter, CodestralConverter o None.
+                  Se fornito, i blocchi non convertibili dalle regole vengono
+                  inviati al LLM prima di emettere un commento TODO.
     """
     if not blocks:
         return "# Nessun blocco da convertire."
@@ -1274,7 +1320,7 @@ def convert_tree(blocks: Dict[str, dict]) -> str:
     # Ordinamento per riga di partenza per preservare l'ordine del file SAS
     root_uids.sort(key=lambda u: blocks[u].get("linea_start", 0))
 
-    global_ctx = ConversionContext()
+    global_ctx = ConversionContext(llm_backend=llm_backend)
     converted_parts = []
 
     for uid in root_uids:

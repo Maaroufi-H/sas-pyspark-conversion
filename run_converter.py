@@ -38,6 +38,7 @@ from trova_sas3_tracker import (
     export_json,
 )
 from convert_engine import convert_tree, convert_blocks_to_map
+from llm_local import create_llm_backend
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -52,6 +53,7 @@ def convert_sas_file(
     json_intermediate: bool = True,
     verbose: bool = True,
     rules_path: Optional[Path] = None,
+    llm_backend: object = None,
 ) -> Path:
     """
     Converte un singolo file SAS in PySpark.
@@ -95,7 +97,7 @@ def convert_sas_file(
         print(f"        Blocchi trovati: {len(blocks)}")
 
     # Genera la mappa uid -> codice PySpark per la colonna Excel
-    pyspark_map = convert_blocks_to_map(blocks)
+    pyspark_map = convert_blocks_to_map(blocks, llm_backend=llm_backend)
 
     # -- Passo 2 : Export intermedi (JSON + Excel) --------------------
     if json_intermediate:
@@ -114,7 +116,7 @@ def convert_sas_file(
     if verbose:
         print("  [3/3] Conversione in PySpark...")
 
-    pyspark_code = convert_tree(blocks)
+    pyspark_code = convert_tree(blocks, llm_backend=llm_backend)
 
     # Aggiunge l'intestazione con riferimento al file SAS originale
     origin_comment = (
@@ -299,10 +301,63 @@ def main():
         help="Stampa riepilogo del file generato",
     )
 
+    # Opzioni LLM
+    llm_group = parser.add_argument_group(
+        "LLM (opzionale)",
+        "Integrazione con Ollama o Codestral su cloud privato per migliorare la conversione.\n"
+        "Alternativa: crea llm_config.json nella root del progetto."
+    )
+    llm_group.add_argument(
+        "--llm-strategy",
+        metavar="STRATEGY",
+        default=None,
+        help="Strategia LLM: 'ollama', 'codestral', 'auto', 'none' (default: legge da llm_config.json)",
+    )
+    llm_group.add_argument(
+        "--llm-host",
+        metavar="URL",
+        default=None,
+        help="URL del server LLM (es. http://mon-cloud:11434 per Ollama, http://mon-cloud:8080/v1 per Codestral)",
+    )
+    llm_group.add_argument(
+        "--llm-model",
+        metavar="MODEL",
+        default=None,
+        help="Modello LLM (es. codestral, deepseek-coder:6.7b, codestral-latest)",
+    )
+    llm_group.add_argument(
+        "--llm-api-key",
+        metavar="KEY",
+        default="not-needed",
+        help="API key per il server LLM privato (default: 'not-needed')",
+    )
+
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     verbose    = not args.quiet
+
+    # -- Backend LLM --------------------------------------------------
+    llm_backend = None
+    llm_strategy = args.llm_strategy  # None se non specificato → letto da config
+
+    if llm_strategy != "none":
+        # Costruisce i kwargs solo per i parametri esplicitamente passati
+        llm_kwargs: dict = {}
+        if llm_strategy:
+            llm_kwargs["strategy"] = llm_strategy
+        if args.llm_host and args.llm_strategy == "ollama":
+            llm_kwargs["ollama_host"] = args.llm_host
+        if args.llm_host and args.llm_strategy in ("codestral", None, "auto"):
+            llm_kwargs["codestral_host"] = args.llm_host
+        if args.llm_model and args.llm_strategy == "ollama":
+            llm_kwargs["ollama_model"] = args.llm_model
+        if args.llm_model and args.llm_strategy in ("codestral", None, "auto"):
+            llm_kwargs["codestral_model"] = args.llm_model
+        if args.llm_api_key and args.llm_api_key != "not-needed":
+            llm_kwargs["codestral_api_key"] = args.llm_api_key
+
+        llm_backend = create_llm_backend(**llm_kwargs)
 
     # -- Modalità BATCH -----------------------------------------------
     if args.batch:
@@ -326,6 +381,7 @@ def main():
         excel      = not args.no_excel,
         json_intermediate = not args.no_json,
         verbose    = verbose,
+        llm_backend = llm_backend,
     )
 
     if py_path and args.summary:
