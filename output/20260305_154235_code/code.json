@@ -1,0 +1,450 @@
+[
+  {
+    "uid": "c92b34e9449522cc:macro:2:4644b6ae327da384",
+    "tipo": "macro_aggregazione(livello);_1",
+    "macro_categoria": "MACRO_DEF",
+    "linea_start": 2,
+    "linea_stop": 160,
+    "chiuso": true,
+    "depth": 0,
+    "convertibile_auto": "NO",
+    "affidabilita_auto": "BASSA",
+    "testo": "%MACRO aggregazione(livello);\n\n%put AGGREG&livello;\nods select none;\n\nproc tabulate data=PERDITE_UOCE out=PERDITE_UOCE_AGGR missing;\n  class AGGREG&livello prodotto_DESC;\n  var SUM_of_SUM_of_Importo;\n  table prodotto_DESC,AGGREG&livello*SUM_of_SUM_of_Importo='somma';\nrun;\n\nods select all;\n\n\nproc sql noprint;\nselect distinct prodotto_DESC  into :prod1- from dati_dw.prodotto_canale\nwhere prodotto_cod in ( %if &nid = 1 %then %do;\n\t\t\t\t\t\t\t\t \"&id_prodotto1.\"\n\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t%do i=1 %to &nid;\n\t\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\t%if &i ^= &nid %then %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\",\n\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\"\n\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t%end;\n\t\t\t\t\t\t\t\t%end;\n\t\t\t\t\t\t\t   )\n;\n%let N_prod = &sqlobs;\nselect distinct %if &livello = 1 %then %do;\n\t\t\t\tcanale_aggr\n\t\t\t\t%end;\n\t\t\t\t%if &livello = 2 %then %do;\n\t\t\t\taggreg\n\t\t\t\t%end;\n\t\t\t\t%if &livello = 3 %then %do;\n\t\t\t\taggreg2\n\t\t\t\t%end;  into :col1- from dati_dw.aggregazioni\n;\n%let N_col = &sqlobs;\nquit;\n\n\n%do i = 1 %to &N_prod;\ndata visualizza&i;\n\tlength prodotto $ 64;\n\n\tif _N_ = 1 then do;\n\n\t\tprodotto = \"&&prod&i\";\n\n\t\t%do j = 1 %to &N_col.; &&col&j. = 0; %end;\n\t\toutput;\n\tend;\n\t\n\tset PERDITE_UOCE_AGGR(where=(prodotto_DESC = \"&&prod&i\"));\n\n\tprodotto = \"&&prod&i\";\n\t%do j = 1 %to &N_col.;\n\t\t\t\n\t\t&&col&j. = 0;\n\t\tif aggreg&livello = \"&&col&j.\"\tthen &&col&j. = SUM_of_SUM_of_Importo_Sum /1000000;\n\t\t\t\n\t%end;\n\t\n\tKEEP prodotto %do j = 1 %to &N_col; &&col&j %end;;\n\toutput;\n\t\nrun;\n%end;\n\ndata APPOGGIO;\nset %do i = 1 %to &N_prod; visualizza&i %end;;\nrun;\n\nproc sql noprint;\ncreate table TAB_PERDITE&LIVELLO as\nselect distinct t2.aggregazione, t1.prodotto,\n%do i = 1 %to &N_col;\n\t%if &i = &N_col %then %do;\n\t\tsum(t1.&&col&i) as &&col&i\n\t%end;\n\n\t%else %do;\n\t\tsum(t1.&&col&i) as &&col&i, \n\t%end;\n%end;\nfrom APPOGGIO t1\nleft join DATI_DW.prodotto_canale t2 on (t1.prodotto = t2.prodotto_desc)\ngroup by t1.prodotto, t2.aggregazione\n;\n/*\ncreate table riassunto as\nselect distinct aggregazione,\n%do i = 1 %to &N_col;\n\tsum(&&col&i) as &&col&i, \n%end;\nsum(%do i = 1 %to &N_col;\n\t\t%if &i = &N_col %then %do;\n\t\t\tsum(&&col&i))\n\t\t%end; \n\t\t%else %do;\n\t\t\tsum(&&col&i),\n\t\t%end; \n\t%end; as TOT\nfrom TAB_PERDITE&LIVELLO\ngroup by aggregazione\n;\nquit;\n*/\nproc delete data = PERDITE_UOCE_AGGR APPOGGIO %do i = 1 %to &N_prod; visualizza&i %end; ;\nrun;\n/*\nproc export\n\tdata= TAB_PERDITE&LIVELLO\n\tdbms=xlsx\n    outfile=\"/sas/staging/opt/sasop/pgm/SAS_standard/sascode/finale.xlsx\"\n    replace;\nrun;\n\nproc sql noprint;\ncreate table tab_new as\nselect\n%do i = 1 %to &N_col;\n\t\n\tsum(&&col&i) as &&col&i, \n\n%end;\n\nsum(%do i = 1 %to &N_col;\n\t\t%if &i = &N_col %then %do;\n\t\t\tsum(&&col&i))\n\t\t%end; \n\t\t%else %do;\n\t\t\tsum(&&col&i),\n\t\t%end; \n\t%end; as TOT\nfrom TAB_PERDITE&LIVELLO\n;\nquit;\n\nproc transpose data=tab_new out=tab_new_transp;\nvar %do i = 1 %to &N_col; &&col&i %end; tot;\nrun;\n\ndata tab_new;\nset tab_new_transp(rename=(_NAME_ = perd_op_nette col1 = mln_euro ));\nrun;\n\n*/\n   \n%mend;\n",
+    "children": [
+      {
+        "uid": "c92b34e9449522cc:proc_sql:16:018b648ee62f458c",
+        "tipo": "proc_sql_sql_25",
+        "macro_categoria": "PROC_SQL",
+        "linea_start": 16,
+        "linea_stop": 49,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "MEDIA",
+        "testo": "proc sql noprint;\nselect distinct prodotto_DESC  into :prod1- from dati_dw.prodotto_canale\nwhere prodotto_cod in ( %if &nid = 1 %then %do;\n\t\t\t\t\t\t\t\t \"&id_prodotto1.\"\n\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t%do i=1 %to &nid;\n\t\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\t%if &i ^= &nid %then %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\",\n\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\"\n\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t%end;\n\t\t\t\t\t\t\t\t%end;\n\t\t\t\t\t\t\t   )\n;\n%let N_prod = &sqlobs;\nselect distinct %if &livello = 1 %then %do;\n\t\t\t\tcanale_aggr\n\t\t\t\t%end;\n\t\t\t\t%if &livello = 2 %then %do;\n\t\t\t\taggreg\n\t\t\t\t%end;\n\t\t\t\t%if &livello = 3 %then %do;\n\t\t\t\taggreg2\n\t\t\t\t%end;  into :col1- from dati_dw.aggregazioni\n;\n%let N_col = &sqlobs;\nquit;\n",
+        "children": [
+          {
+            "uid": "c92b34e9449522cc:elsedo:22:7241ee1a98cafc3c",
+            "tipo": "elsedo_31",
+            "macro_categoria": "ELSE_BLOCK",
+            "linea_start": 22,
+            "linea_stop": 33,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "MEDIA",
+            "testo": "\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t%do i=1 %to &nid;\n\t\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\t%if &i ^= &nid %then %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\",\n\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\"\n\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t%end;\n",
+            "children": [
+              {
+                "uid": "c92b34e9449522cc:ifdo:25:9cd94faa0175204a",
+                "tipo": "ifdo_34",
+                "macro_categoria": "IF_BLOCK",
+                "linea_start": 25,
+                "linea_stop": 27,
+                "chiuso": true,
+                "depth": 3,
+                "convertibile_auto": "SI",
+                "affidabilita_auto": "MEDIA",
+                "testo": "\t\t\t\t\t\t\t\t\t\t%if &i ^= &nid %then %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\",\n\t\t\t\t\t\t\t\t\t\t%end;\n"
+              },
+              {
+                "uid": "c92b34e9449522cc:elsedo:29:d5f3ca99d9db7645",
+                "tipo": "elsedo_35",
+                "macro_categoria": "ELSE_BLOCK",
+                "linea_start": 29,
+                "linea_stop": 31,
+                "chiuso": true,
+                "depth": 3,
+                "convertibile_auto": "SI",
+                "affidabilita_auto": "MEDIA",
+                "testo": "\t\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\"\n\t\t\t\t\t\t\t\t\t\t%end;\n"
+              }
+            ]
+          },
+          {
+            "uid": "c92b34e9449522cc:ifdo:41:08989a08e1b504e0",
+            "tipo": "ifdo_32",
+            "macro_categoria": "IF_BLOCK",
+            "linea_start": 41,
+            "linea_stop": 43,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "MEDIA",
+            "testo": "\t\t\t\t%if &livello = 2 %then %do;\n\t\t\t\taggreg\n\t\t\t\t%end;\n"
+          },
+          {
+            "uid": "c92b34e9449522cc:ifdo:44:d13cb4fdb9a344ca",
+            "tipo": "ifdo_33",
+            "macro_categoria": "IF_BLOCK",
+            "linea_start": 44,
+            "linea_stop": null,
+            "chiuso": false,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "MEDIA",
+            "testo": "\t\t\t\t%if &livello = 3 %then %do;\n\t\t\t\taggreg2\n\t\t\t\t%end;  into :col1- from dati_dw.aggregazioni\n;\n%let N_col = &sqlobs;\n"
+          }
+        ]
+      },
+      {
+        "uid": "c92b34e9449522cc:data:53:0cac17bc4e598904",
+        "tipo": "data_visualizza&i_26",
+        "macro_categoria": "DATA_STEP",
+        "linea_start": 53,
+        "linea_stop": 77,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "ALTA",
+        "testo": "data visualizza&i;\n\tlength prodotto $ 64;\n\n\tif _N_ = 1 then do;\n\n\t\tprodotto = \"&&prod&i\";\n\n\t\t%do j = 1 %to &N_col.; &&col&j. = 0; %end;\n\t\toutput;\n\tend;\n\t\n\tset PERDITE_UOCE_AGGR(where=(prodotto_DESC = \"&&prod&i\"));\n\n\tprodotto = \"&&prod&i\";\n\t%do j = 1 %to &N_col.;\n\t\t\t\n\t\t&&col&j. = 0;\n\t\tif aggreg&livello = \"&&col&j.\"\tthen &&col&j. = SUM_of_SUM_of_Importo_Sum /1000000;\n\t\t\t\n\t%end;\n\t\n\tKEEP prodotto %do j = 1 %to &N_col; &&col&j %end;;\n\toutput;\n\t\nrun;\n"
+      },
+      {
+        "uid": "c92b34e9449522cc:data:80:89624146a6144080",
+        "tipo": "data_APPOGGIO_27",
+        "macro_categoria": "DATA_STEP",
+        "linea_start": 80,
+        "linea_stop": 82,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "ALTA",
+        "testo": "data APPOGGIO;\nset %do i = 1 %to &N_prod; visualizza&i %end;;\nrun;\n"
+      },
+      {
+        "uid": "c92b34e9449522cc:proc_sql:84:e939b81b0a9a362e",
+        "tipo": "proc_sql_sql_28",
+        "macro_categoria": "PROC_SQL",
+        "linea_start": 84,
+        "linea_stop": 120,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "ALTA",
+        "testo": "proc sql noprint;\ncreate table TAB_PERDITE&LIVELLO as\nselect distinct t2.aggregazione, t1.prodotto,\n%do i = 1 %to &N_col;\n\t%if &i = &N_col %then %do;\n\t\tsum(t1.&&col&i) as &&col&i\n\t%end;\n\n\t%else %do;\n\t\tsum(t1.&&col&i) as &&col&i, \n\t%end;\n%end;\nfrom APPOGGIO t1\nleft join DATI_DW.prodotto_canale t2 on (t1.prodotto = t2.prodotto_desc)\ngroup by t1.prodotto, t2.aggregazione\n;\n/*\ncreate table riassunto as\nselect distinct aggregazione,\n%do i = 1 %to &N_col;\n\tsum(&&col&i) as &&col&i, \n%end;\nsum(%do i = 1 %to &N_col;\n\t\t%if &i = &N_col %then %do;\n\t\t\tsum(&&col&i))\n\t\t%end; \n\t\t%else %do;\n\t\t\tsum(&&col&i),\n\t\t%end; \n\t%end; as TOT\nfrom TAB_PERDITE&LIVELLO\ngroup by aggregazione\n;\nquit;\n*/\nproc delete data = PERDITE_UOCE_AGGR APPOGGIO %do i = 1 %to &N_prod; visualizza&i %end; ;\nrun;\n",
+        "children": [
+          {
+            "uid": "c92b34e9449522cc:ifdo:88:63521da344887110",
+            "tipo": "ifdo_29",
+            "macro_categoria": "IF_BLOCK",
+            "linea_start": 88,
+            "linea_stop": 90,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "MEDIA",
+            "testo": "\t%if &i = &N_col %then %do;\n\t\tsum(t1.&&col&i) as &&col&i\n\t%end;\n"
+          },
+          {
+            "uid": "c92b34e9449522cc:elsedo:92:d2a2003abcc00b6a",
+            "tipo": "elsedo_30",
+            "macro_categoria": "ELSE_BLOCK",
+            "linea_start": 92,
+            "linea_stop": 94,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "MEDIA",
+            "testo": "\t%else %do;\n\t\tsum(t1.&&col&i) as &&col&i, \n\t%end;\n"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "uid": "c92b34e9449522cc:macro:162:8df86bdcdc38ea65",
+    "tipo": "macro_varie_aggregazioni;_2",
+    "macro_categoria": "MACRO_DEF",
+    "linea_start": 162,
+    "linea_stop": 176,
+    "chiuso": true,
+    "depth": 0,
+    "convertibile_auto": "SI",
+    "affidabilita_auto": "MEDIA",
+    "testo": "%macro varie_aggregazioni;\n\n\t%if &livAgregg_count = 1 %then %do;\n\t\t%let liv = %sysfunc(int(&livAgregg)); \n\t\t%aggregazione(livello = &liv)\n\t%end;\n\n\t%else %do;\n\t\t%do k = 1 %to &livAgregg_count;\n\t\t\t%let liv = %sysfunc(int(&&livAgregg&k)); \n\t\t\t%aggregazione(livello = &liv)\n\t\t%end;\n\t%end;\n\n%mend;\n",
+    "children": [
+      {
+        "uid": "c92b34e9449522cc:ifdo:164:1c041a87f00c0fea",
+        "tipo": "ifdo_21",
+        "macro_categoria": "IF_BLOCK",
+        "linea_start": 164,
+        "linea_stop": 167,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "MEDIA",
+        "testo": "\t%if &livAgregg_count = 1 %then %do;\n\t\t%let liv = %sysfunc(int(&livAgregg)); \n\t\t%aggregazione(livello = &liv)\n\t%end;\n",
+        "children": [
+          {
+            "uid": "c92b34e9449522cc:run_macro:166:e5ec01dd3a61469e",
+            "tipo": "runmacro_24",
+            "macro_categoria": "MACRO_CALL",
+            "linea_start": 166,
+            "linea_stop": null,
+            "chiuso": false,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "BASSA",
+            "testo": "\t\t%aggregazione(livello = &liv)\n"
+          }
+        ]
+      },
+      {
+        "uid": "c92b34e9449522cc:elsedo:169:9cfcaa960e032b1e",
+        "tipo": "elsedo_22",
+        "macro_categoria": "ELSE_BLOCK",
+        "linea_start": 169,
+        "linea_stop": 173,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "MEDIA",
+        "testo": "\t%else %do;\n\t\t%do k = 1 %to &livAgregg_count;\n\t\t\t%let liv = %sysfunc(int(&&livAgregg&k)); \n\t\t\t%aggregazione(livello = &liv)\n\t\t%end;\n",
+        "children": [
+          {
+            "uid": "c92b34e9449522cc:run_macro:172:5df2edcd48368da8",
+            "tipo": "runmacro_23",
+            "macro_categoria": "MACRO_CALL",
+            "linea_start": 172,
+            "linea_stop": null,
+            "chiuso": false,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "BASSA",
+            "testo": "\t\t\t%aggregazione(livello = &liv)\n"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "uid": "c92b34e9449522cc:proc_sql:184:50357a21a6ed4367",
+    "tipo": "proc_sql_sql_3",
+    "macro_categoria": "PROC_SQL",
+    "linea_start": 184,
+    "linea_stop": 188,
+    "chiuso": true,
+    "depth": 0,
+    "convertibile_auto": "SI",
+    "affidabilita_auto": "MEDIA",
+    "testo": "proc sql noprint;\nselect distinct id \ninto :id_prodotto1-\nfrom prodIn_cruscSettimanale;\nquit;\n"
+  },
+  {
+    "uid": "c92b34e9449522cc:macro:192:b081c32803c567c2",
+    "tipo": "macro_vari_join;_4",
+    "macro_categoria": "MACRO_DEF",
+    "linea_start": 192,
+    "linea_stop": 240,
+    "chiuso": true,
+    "depth": 0,
+    "convertibile_auto": "NO",
+    "affidabilita_auto": "BASSA",
+    "testo": "%macro vari_join;\n\n\tproc sql;\n\tcreate table PERDITE_UOCE as\n\tselect t1.*,\n\tt2.riferimento /*as aggregaz*/,\n\tt2.aggregazione as riassunto,\n\tt3.cruscotto as aggreg1,\n\tt4.aggreg as aggreg2,\n\tt4.aggreg2 as aggreg3\n\tfrom QUERY_FOR_PERDITEUOCE t1 \n\tleft join DATI_DW.prodotto_canale t2 on (t1.prodotto_code = t2.prodotto_cod)\n\tleft join DATI_DW.cod_frodi t3 on (t1.Event_Type_CODE = t3.Event_Type)\n\tleft join dati_dw.aggregazioni t4 on (t3.cruscotto = t4.canale_aggr)\n\twhere t1.prodotto_code in ( %if &nid = 1 %then %do;\n\t\t\t\t\t\t\t\t \"&id_prodotto1.\"\n\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t%do i=1 %to &nid;\n\t\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\t%if &i ^= &nid %then %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\",\n\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\"\n\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t%end;\n\t\t\t\t\t\t\t\t%end;\n\t\t\t\t\t\t\t   )\n\t;\n\tquit;\n\n\tdata PERDITE_UOCE;\n\t\tset PERDITE_UOCE;\n\t\tif aggreg1 = \"\" then aggreg1 = \"altro\";\n\t\tif aggreg2 = \"\" then aggreg2 = \"altro\";\n\t\tif aggreg3 = \"\" then aggreg3 = \"altro\";\n\t\t%do i = 1 %to &nvar.;\n\n\t\t\t&&campo&i.. = compress(translate(trimn(&&campo&i..),\"_\",\" \"), , 'kad');\n\t\t\tif &&campo&i.. = \"\" then &&campo&i.. = \"altro\";\n\n\t\t%end;\n\trun;\n\n%mend vari_join;\n",
+    "children": [
+      {
+        "uid": "c92b34e9449522cc:proc_sql:194:41b4edea90193dd8",
+        "tipo": "proc_sql_sql;_16",
+        "macro_categoria": "PROC_SQL",
+        "linea_start": 194,
+        "linea_stop": 225,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "ALTA",
+        "testo": "\tproc sql;\n\tcreate table PERDITE_UOCE as\n\tselect t1.*,\n\tt2.riferimento /*as aggregaz*/,\n\tt2.aggregazione as riassunto,\n\tt3.cruscotto as aggreg1,\n\tt4.aggreg as aggreg2,\n\tt4.aggreg2 as aggreg3\n\tfrom QUERY_FOR_PERDITEUOCE t1 \n\tleft join DATI_DW.prodotto_canale t2 on (t1.prodotto_code = t2.prodotto_cod)\n\tleft join DATI_DW.cod_frodi t3 on (t1.Event_Type_CODE = t3.Event_Type)\n\tleft join dati_dw.aggregazioni t4 on (t3.cruscotto = t4.canale_aggr)\n\twhere t1.prodotto_code in ( %if &nid = 1 %then %do;\n\t\t\t\t\t\t\t\t \"&id_prodotto1.\"\n\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t%do i=1 %to &nid;\n\t\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\t%if &i ^= &nid %then %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\",\n\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\"\n\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t%end;\n\t\t\t\t\t\t\t\t%end;\n\t\t\t\t\t\t\t   )\n\t;\n\tquit;\n",
+        "children": [
+          {
+            "uid": "c92b34e9449522cc:elsedo:210:7241ee1a98cafc3c",
+            "tipo": "elsedo_18",
+            "macro_categoria": "ELSE_BLOCK",
+            "linea_start": 210,
+            "linea_stop": 221,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "MEDIA",
+            "testo": "\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t%do i=1 %to &nid;\n\t\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\t%if &i ^= &nid %then %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\",\n\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\"\n\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t%end;\n",
+            "children": [
+              {
+                "uid": "c92b34e9449522cc:ifdo:213:9cd94faa0175204a",
+                "tipo": "ifdo_19",
+                "macro_categoria": "IF_BLOCK",
+                "linea_start": 213,
+                "linea_stop": 215,
+                "chiuso": true,
+                "depth": 3,
+                "convertibile_auto": "SI",
+                "affidabilita_auto": "MEDIA",
+                "testo": "\t\t\t\t\t\t\t\t\t\t%if &i ^= &nid %then %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\",\n\t\t\t\t\t\t\t\t\t\t%end;\n"
+              },
+              {
+                "uid": "c92b34e9449522cc:elsedo:217:d5f3ca99d9db7645",
+                "tipo": "elsedo_20",
+                "macro_categoria": "ELSE_BLOCK",
+                "linea_start": 217,
+                "linea_stop": 219,
+                "chiuso": true,
+                "depth": 3,
+                "convertibile_auto": "SI",
+                "affidabilita_auto": "MEDIA",
+                "testo": "\t\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\"\n\t\t\t\t\t\t\t\t\t\t%end;\n"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "uid": "c92b34e9449522cc:data:227:161dfeec7c1492aa",
+        "tipo": "data_PERDITE_UOCE_17",
+        "macro_categoria": "DATA_STEP",
+        "linea_start": 227,
+        "linea_stop": 238,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "ALTA",
+        "testo": "\tdata PERDITE_UOCE;\n\t\tset PERDITE_UOCE;\n\t\tif aggreg1 = \"\" then aggreg1 = \"altro\";\n\t\tif aggreg2 = \"\" then aggreg2 = \"altro\";\n\t\tif aggreg3 = \"\" then aggreg3 = \"altro\";\n\t\t%do i = 1 %to &nvar.;\n\n\t\t\t&&campo&i.. = compress(translate(trimn(&&campo&i..),\"_\",\" \"), , 'kad');\n\t\t\tif &&campo&i.. = \"\" then &&campo&i.. = \"altro\";\n\n\t\t%end;\n\trun;\n"
+      }
+    ]
+  },
+  {
+    "uid": "c92b34e9449522cc:macro:242:2a9a4cacdc809f82",
+    "tipo": "macro_perdite_frodi;_5",
+    "macro_categoria": "MACRO_DEF",
+    "linea_start": 242,
+    "linea_stop": 342,
+    "chiuso": true,
+    "depth": 0,
+    "convertibile_auto": "NO",
+    "affidabilita_auto": "BASSA",
+    "testo": "%macro perdite_frodi;\n\n%do k = 1 %to &nvar.;\n\n\tods select none;\n\n\tproc tabulate data=PERDITE_UOCE out=PERDITE_UOCE_AGGR missing;\n\t  class &&campo&k.. prodotto_DESC;\n\t  var SUM_of_SUM_of_Importo;\n\t  table prodotto_DESC,&&campo&k..*SUM_of_SUM_of_Importo='somma';\n\trun;\n\n\tods select all;\n\n\t\n\tproc sql noprint;\n\tselect distinct prodotto_DESC  into :prod1- from dati_dw.prodotto_canale\n\twhere prodotto_cod in ( %if &nid = 1 %then %do;\n\t\t\t\t\t\t\t\t\t \"&id_prodotto1.\"\n\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t%do i=1 %to &nid;\n\t\t\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\t\t%if &i ^= &nid %then %do;\n\t\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\",\n\t\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\"\n\t\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t\t%end;\n\t\t\t\t\t\t\t\t\t%end;\n\t\t\t\t\t\t\t\t   )\n\t;\n\t%let N_prod = &sqlobs;\n\tselect distinct &&campo&k.. into :col1- from PERDITE_UOCE\n\t;\n\t%let N_col = &sqlobs;\n\tquit;\n\n\t%do i = 1 %to &N_prod;\n\tdata visualizza&i;\n\t\tlength prodotto $ 64;\n\n\t\tif _N_ = 1 then do;\n\n\t\t\tprodotto = \"&&prod&i\";\n\n\t\t\t%do j = 1 %to &N_col.;\n\t\t\t\t%let old_col&j. = &&col&j.;\n\t\t\t\t%let col&j. = %sysfunc(compress(&&col&j..,, ka));\n\t\t\t\t%let col&j. = %substr(&&col&j.., 1, %sysfunc(min(32, %length(&&col&j..))));\n\t\t\t\t&&col&j. = 0; \n\t\t\t%end;\n\t\t\toutput;\n\t\tend;\n\t\t\n\t\tset PERDITE_UOCE_AGGR(where=(prodotto_DESC = \"&&prod&i\"));\n\n\t\tprodotto = \"&&prod&i\";\n\t\t%do j = 1 %to &N_col.;\n\t\t\t\t\n\t\t\t&&col&j. = 0;\n\t\t\tif &&campo&k.. = \"&&old_col&j..\"\tthen &&col&j. = SUM_of_SUM_of_Importo_Sum /1000000;\n\t\t\t\t\n\t\t%end;\n\t\t\n\t\tKEEP prodotto %do j = 1 %to &N_col; &&col&j %end;;\n\t\toutput;\n\t\t\n\trun;\n\t%end;\n\n\tdata APPOGGIO;\n\tset %do i = 1 %to &N_prod; visualizza&i %end;;\n\trun;\n\n\tproc sql noprint;\n\tcreate table PERDITE_&&campo&k.. as\n\tselect distinct t2.aggregazione, t1.prodotto,\n\t%do i = 1 %to &N_col;\n\t\t%if &i = &N_col %then %do;\n\t\t\tsum(t1.&&col&i) as &&col&i\n\t\t%end;\n\n\t\t%else %do;\n\t\t\tsum(t1.&&col&i) as &&col&i, \n\t\t%end;\n\t%end;\n\tfrom APPOGGIO t1\n\tleft join DATI_DW.prodotto_canale t2 on (t1.prodotto = t2.prodotto_desc)\n\tgroup by t1.prodotto, t2.aggregazione\n\t;\n\t\n\tproc delete data = PERDITE_UOCE_AGGR APPOGGIO %do i = 1 %to &N_prod; visualizza&i %end; ;\n\trun;\n%end;\n\n%mend;\n",
+    "children": [
+      {
+        "uid": "c92b34e9449522cc:proc_sql:257:dd5d9a9604e2f262",
+        "tipo": "proc_sql_sql_7",
+        "macro_categoria": "PROC_SQL",
+        "linea_start": 257,
+        "linea_stop": 282,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "MEDIA",
+        "testo": "\tproc sql noprint;\n\tselect distinct prodotto_DESC  into :prod1- from dati_dw.prodotto_canale\n\twhere prodotto_cod in ( %if &nid = 1 %then %do;\n\t\t\t\t\t\t\t\t\t \"&id_prodotto1.\"\n\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t%do i=1 %to &nid;\n\t\t\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\t\t%if &i ^= &nid %then %do;\n\t\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\",\n\t\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\"\n\t\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t\t%end;\n\t\t\t\t\t\t\t\t\t%end;\n\t\t\t\t\t\t\t\t   )\n\t;\n\t%let N_prod = &sqlobs;\n\tselect distinct &&campo&k.. into :col1- from PERDITE_UOCE\n\t;\n\t%let N_col = &sqlobs;\n\tquit;\n",
+        "children": [
+          {
+            "uid": "c92b34e9449522cc:elsedo:263:94ea715c5accee86",
+            "tipo": "elsedo_13",
+            "macro_categoria": "ELSE_BLOCK",
+            "linea_start": 263,
+            "linea_stop": 274,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "MEDIA",
+            "testo": "\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t%do i=1 %to &nid;\n\t\t\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\t\t%if &i ^= &nid %then %do;\n\t\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\",\n\t\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\"\n\t\t\t\t\t\t\t\t\t\t\t%end;\n\n\t\t\t\t\t\t\t\t\t\t%end;\n",
+            "children": [
+              {
+                "uid": "c92b34e9449522cc:ifdo:266:4c412f0bc2cb1d9a",
+                "tipo": "ifdo_14",
+                "macro_categoria": "IF_BLOCK",
+                "linea_start": 266,
+                "linea_stop": 268,
+                "chiuso": true,
+                "depth": 3,
+                "convertibile_auto": "SI",
+                "affidabilita_auto": "MEDIA",
+                "testo": "\t\t\t\t\t\t\t\t\t\t\t%if &i ^= &nid %then %do;\n\t\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\",\n\t\t\t\t\t\t\t\t\t\t\t%end;\n"
+              },
+              {
+                "uid": "c92b34e9449522cc:elsedo:270:88e078f5b06f0681",
+                "tipo": "elsedo_15",
+                "macro_categoria": "ELSE_BLOCK",
+                "linea_start": 270,
+                "linea_stop": 272,
+                "chiuso": true,
+                "depth": 3,
+                "convertibile_auto": "SI",
+                "affidabilita_auto": "MEDIA",
+                "testo": "\t\t\t\t\t\t\t\t\t\t\t%else %do;\n\t\t\t\t\t\t\t\t\t\t\t\t\"&&id_prodotto&i\"\n\t\t\t\t\t\t\t\t\t\t\t%end;\n"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "uid": "c92b34e9449522cc:data:285:8e672d27b867ec7c",
+        "tipo": "data_visualizza&i_8",
+        "macro_categoria": "DATA_STEP",
+        "linea_start": 285,
+        "linea_stop": 314,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "ALTA",
+        "testo": "\tdata visualizza&i;\n\t\tlength prodotto $ 64;\n\n\t\tif _N_ = 1 then do;\n\n\t\t\tprodotto = \"&&prod&i\";\n\n\t\t\t%do j = 1 %to &N_col.;\n\t\t\t\t%let old_col&j. = &&col&j.;\n\t\t\t\t%let col&j. = %sysfunc(compress(&&col&j..,, ka));\n\t\t\t\t%let col&j. = %substr(&&col&j.., 1, %sysfunc(min(32, %length(&&col&j..))));\n\t\t\t\t&&col&j. = 0; \n\t\t\t%end;\n\t\t\toutput;\n\t\tend;\n\t\t\n\t\tset PERDITE_UOCE_AGGR(where=(prodotto_DESC = \"&&prod&i\"));\n\n\t\tprodotto = \"&&prod&i\";\n\t\t%do j = 1 %to &N_col.;\n\t\t\t\t\n\t\t\t&&col&j. = 0;\n\t\t\tif &&campo&k.. = \"&&old_col&j..\"\tthen &&col&j. = SUM_of_SUM_of_Importo_Sum /1000000;\n\t\t\t\t\n\t\t%end;\n\t\t\n\t\tKEEP prodotto %do j = 1 %to &N_col; &&col&j %end;;\n\t\toutput;\n\t\t\n\trun;\n"
+      },
+      {
+        "uid": "c92b34e9449522cc:data:317:ef98c70170479205",
+        "tipo": "data_APPOGGIO_9",
+        "macro_categoria": "DATA_STEP",
+        "linea_start": 317,
+        "linea_stop": 319,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "ALTA",
+        "testo": "\tdata APPOGGIO;\n\tset %do i = 1 %to &N_prod; visualizza&i %end;;\n\trun;\n"
+      },
+      {
+        "uid": "c92b34e9449522cc:proc_sql:321:a50267b823fbe7c2",
+        "tipo": "proc_sql_sql_10",
+        "macro_categoria": "PROC_SQL",
+        "linea_start": 321,
+        "linea_stop": 339,
+        "chiuso": true,
+        "depth": 1,
+        "convertibile_auto": "SI",
+        "affidabilita_auto": "ALTA",
+        "testo": "\tproc sql noprint;\n\tcreate table PERDITE_&&campo&k.. as\n\tselect distinct t2.aggregazione, t1.prodotto,\n\t%do i = 1 %to &N_col;\n\t\t%if &i = &N_col %then %do;\n\t\t\tsum(t1.&&col&i) as &&col&i\n\t\t%end;\n\n\t\t%else %do;\n\t\t\tsum(t1.&&col&i) as &&col&i, \n\t\t%end;\n\t%end;\n\tfrom APPOGGIO t1\n\tleft join DATI_DW.prodotto_canale t2 on (t1.prodotto = t2.prodotto_desc)\n\tgroup by t1.prodotto, t2.aggregazione\n\t;\n\t\n\tproc delete data = PERDITE_UOCE_AGGR APPOGGIO %do i = 1 %to &N_prod; visualizza&i %end; ;\n\trun;\n",
+        "children": [
+          {
+            "uid": "c92b34e9449522cc:ifdo:325:89d5267a1e87a6fa",
+            "tipo": "ifdo_11",
+            "macro_categoria": "IF_BLOCK",
+            "linea_start": 325,
+            "linea_stop": 327,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "MEDIA",
+            "testo": "\t\t%if &i = &N_col %then %do;\n\t\t\tsum(t1.&&col&i) as &&col&i\n\t\t%end;\n"
+          },
+          {
+            "uid": "c92b34e9449522cc:elsedo:329:c40d97799df9ef87",
+            "tipo": "elsedo_12",
+            "macro_categoria": "ELSE_BLOCK",
+            "linea_start": 329,
+            "linea_stop": 331,
+            "chiuso": true,
+            "depth": 2,
+            "convertibile_auto": "SI",
+            "affidabilita_auto": "MEDIA",
+            "testo": "\t\t%else %do;\n\t\t\tsum(t1.&&col&i) as &&col&i, \n\t\t%end;\n"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "uid": "c92b34e9449522cc:proc_sql:352:554b7b6223c32459",
+    "tipo": "proc_sql_sql_6",
+    "macro_categoria": "PROC_SQL",
+    "linea_start": 352,
+    "linea_stop": 356,
+    "chiuso": true,
+    "depth": 0,
+    "convertibile_auto": "SI",
+    "affidabilita_auto": "MEDIA",
+    "testo": "proc sql noprint;\nselect distinct campo\ninto :campo1-\nfrom var_frodi_reclami;\nquit;\n"
+  }
+]
