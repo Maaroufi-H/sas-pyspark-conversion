@@ -1,0 +1,64 @@
+version: "3.9"
+
+# ═══════════════════════════════════════════════════════════════
+# Docker Compose – SAS → PySpark Converter
+# ═══════════════════════════════════════════════════════════════
+#
+# Avvio:   docker-compose up -d
+# Arresto: docker-compose down
+# Logs:    docker-compose logs -f
+# Rebuild: docker-compose up -d --build
+#
+# Dopo l'avvio: http://localhost/ (porta 80)
+# Su Azure VM:  http://<IP-PUBBLICO-VM>/
+# ═══════════════════════════════════════════════════════════════
+
+services:
+  sas-converter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sas-converter:latest
+    container_name: sas-pyspark-web
+
+    ports:
+      # 80:5000 → porta HTTP standard Azure (apri porta 80 nell'NSG)
+      - "80:5000"
+
+    volumes:
+      # Output persistente: i file convertiti rimangono dopo il restart
+      - ./output:/app/output
+      # INPUT: monta la cartella SAS sorgente (opzionale)
+      - ./INPUT:/app/INPUT:ro
+
+    environment:
+      - FLASK_ENV=production
+      - PORT=5000
+
+    # Restart automatico in caso di crash o reboot della VM
+    restart: unless-stopped
+
+    # Limiti di risorse (consigliati per Azure B2s: 2vCPU / 4GB RAM)
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 2G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+    # Health check interno
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

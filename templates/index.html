@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SAS → PySpark Converter</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%);
+      border-bottom: 1px solid #2d4a6b;
+      padding: 2rem 2rem 1.5rem;
+      text-align: center;
+    }
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #f8fafc;
+      letter-spacing: -0.5px;
+    }
+    header h1 span { color: #38bdf8; }
+    header p {
+      margin-top: 0.5rem;
+      color: #94a3b8;
+      font-size: 0.95rem;
+    }
+
+    /* ── MAIN ── */
+    main {
+      flex: 1;
+      max-width: 1100px;
+      width: 100%;
+      margin: 2rem auto;
+      padding: 0 1.5rem;
+    }
+
+    /* ── ALERT ERRORE ── */
+    .alert-error {
+      background: #450a0a;
+      border: 1px solid #991b1b;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+      color: #fca5a5;
+    }
+    .alert-error strong { color: #f87171; }
+
+    /* ── CARD ── */
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 1.75rem 2rem;
+      margin-bottom: 1.5rem;
+    }
+    .card h2 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #cbd5e1;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .card h2 .badge {
+      font-size: 0.7rem;
+      font-weight: 500;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      background: #0284c7;
+      color: #e0f2fe;
+    }
+
+    /* ── TEXTAREA SAS ── */
+    textarea#sas_code {
+      width: 100%;
+      height: 380px;
+      background: #0f172a;
+      color: #e2e8f0;
+      border: 1px solid #475569;
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: "Cascadia Code", "Fira Code", "Courier New", monospace;
+      font-size: 0.82rem;
+      line-height: 1.6;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    textarea#sas_code:focus { border-color: #38bdf8; }
+
+    /* ── OPZIONI ── */
+    .options-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      align-items: flex-start;
+      margin-top: 1rem;
+    }
+    .option-group { flex: 1; min-width: 220px; }
+    .option-group label {
+      display: block;
+      font-size: 0.82rem;
+      color: #94a3b8;
+      margin-bottom: 0.4rem;
+    }
+    .option-group input[type="text"] {
+      width: 100%;
+      background: #0f172a;
+      color: #e2e8f0;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      padding: 0.45rem 0.75rem;
+      font-size: 0.82rem;
+      outline: none;
+    }
+    .option-group input[type="text"]:focus { border-color: #38bdf8; }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-top: 1.1rem;
+    }
+    .checkbox-row input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #38bdf8;
+      cursor: pointer;
+    }
+    .checkbox-row label {
+      font-size: 0.88rem;
+      color: #cbd5e1;
+      cursor: pointer;
+    }
+    .checkbox-row .hint {
+      font-size: 0.75rem;
+      color: #64748b;
+      margin-left: 0.25rem;
+    }
+
+    /* ── PULSANTE CONVERTI ── */
+    .btn-convert {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 0.75rem 2rem;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      margin-top: 1.25rem;
+    }
+    .btn-convert:hover { opacity: 0.92; transform: translateY(-1px); }
+    .btn-convert:active { transform: translateY(0); }
+
+    /* ── ESEMPI ── */
+    .examples {
+      margin-top: 0.75rem;
+      font-size: 0.8rem;
+      color: #64748b;
+    }
+    .examples a {
+      color: #38bdf8;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .examples a:hover { text-decoration: underline; }
+
+    /* ── INFO PILLS ── */
+    .pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      margin-top: 0.75rem;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      background: #0f2744;
+      border: 1px solid #2d4a6b;
+      border-radius: 999px;
+      padding: 0.25rem 0.75rem;
+      font-size: 0.75rem;
+      color: #94a3b8;
+    }
+    .pill span { color: #38bdf8; }
+
+    /* ── FOOTER ── */
+    footer {
+      text-align: center;
+      padding: 1.25rem;
+      font-size: 0.75rem;
+      color: #475569;
+      border-top: 1px solid #1e293b;
+    }
+    footer a { color: #38bdf8; text-decoration: none; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>SAS <span>→</span> PySpark Converter</h1>
+  <p>Incolla il tuo codice SAS e ottieni il codice PySpark equivalente con analisi dettagliata.</p>
+</header>
+
+<main>
+  {% if error %}
+  <div class="alert-error">
+    <strong>Errore durante la conversione:</strong><br>
+    {{ error }}
+  </div>
+  {% endif %}
+
+  <form method="POST" action="/convert">
+
+    <div class="card">
+      <h2>
+        Codice SAS
+        <span class="badge">input</span>
+      </h2>
+
+      <textarea
+        id="sas_code"
+        name="sas_code"
+        placeholder="Incolla qui il tuo codice SAS...&#10;&#10;Esempio:&#10;proc sql;&#10;  create table RESULT as&#10;  select id, nome from DATI;&#10;quit;"
+        spellcheck="false"
+        autocomplete="off"
+      >{{ sas_code or "" }}</textarea>
+
+      <div class="examples">
+        Esempi rapidi:
+        <a onclick="loadExample('proc_sql')">PROC SQL</a> ·
+        <a onclick="loadExample('macro')">%MACRO</a> ·
+        <a onclick="loadExample('data_step')">DATA STEP</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Opzioni</h2>
+      <div class="options-row">
+        <div class="option-group">
+          <div class="checkbox-row">
+            <input type="checkbox" id="preprocess" name="preprocess" value="1"
+              {% if request.form.get('preprocess') %}checked{% endif %}>
+            <label for="preprocess">
+              Pre-processore macro Livello 2
+              <span class="hint">(risolve &&var&i, srotola %do)</span>
+            </label>
+          </div>
+        </div>
+        <div class="option-group">
+          <label for="macro_vars">Variabili macro note
+            <span style="color:#64748b">(formato: nid=3 livAgregg=1)</span>
+          </label>
+          <input type="text" id="macro_vars" name="macro_vars"
+            placeholder="es. nid=3 livAgregg=1 path_excel=/data"
+            value="{{ request.form.get('macro_vars', '') }}">
+        </div>
+      </div>
+    </div>
+
+    <button type="submit" class="btn-convert">
+      &#9654; Converti
+    </button>
+
+    <div class="pills" style="margin-top:1.25rem">
+      <span class="pill">&#128196; Genera codice <span>PySpark</span></span>
+      <span class="pill">&#128202; Analisi <span>per blocco</span></span>
+      <span class="pill">&#127881; Color coding <span>affidabilità</span></span>
+      <span class="pill">&#128268; <span>Livello 1 + 2</span> attivi</span>
+    </div>
+
+  </form>
+</main>
+
+<footer>
+  SAS → PySpark Converter v{{ version }} &nbsp;|&nbsp;
+  <a href="https://github.com/Maaroufi-H/sas-pyspark-conversion" target="_blank">GitHub</a>
+</footer>
+
+<script>
+const EXAMPLES = {
+  proc_sql: `proc sql noprint;
+select distinct id
+into :id_prodotto1-
+from PRODOTTI;
+quit;
+
+%let nid = &sqlobs;
+
+proc sql;
+create table RESULT as
+select t1.id, t1.nome, t2.categoria
+from DATI t1
+left join CATEGORIE t2 on (t1.id = t2.id)
+where t1.id in (
+  %if &nid = 1 %then %do; "&id_prodotto1." %end;
+  %else %do;
+    %do i=1 %to &nid;
+      %if &i ^= &nid %then %do; "&&id_prodotto&i", %end;
+      %else %do; "&&id_prodotto&i" %end;
+    %end;
+  %end;
+);
+quit;`,
+
+  macro: `%macro importa_dati(flusso=, data_ref=);
+
+  %if &flusso = A %then %do;
+    data OUTPUT;
+      set FONTE_A;
+      where data_ref = "&data_ref";
+    run;
+  %end;
+  %else %do;
+    data OUTPUT;
+      set FONTE_B;
+    run;
+  %end;
+
+  proc append base=ARCHIVIO data=OUTPUT; run;
+
+%mend;
+
+%importa_dati(flusso=A, data_ref=2024-01-01)`,
+
+  data_step: `data RISULTATO;
+  set FONTE (where=(categoria = "ALPHA") keep=id nome valore);
+  valore_adj = valore * 1.1;
+  categoria_py = upcase(nome);
+run;
+
+proc sort data=RISULTATO out=RISULTATO_SORT nodupkey;
+  by id descending valore_adj;
+run;`
+};
+
+function loadExample(name) {
+  const ta = document.getElementById('sas_code');
+  if (EXAMPLES[name]) {
+    ta.value = EXAMPLES[name];
+    ta.focus();
+  }
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Risultato Conversione – SAS → PySpark</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f172a;
+      --bg2:       #1e293b;
+      --bg3:       #0d1f35;
+      --border:    #334155;
+      --text:      #e2e8f0;
+      --text-muted:#94a3b8;
+      --accent:    #38bdf8;
+      --green-bg:  #14532d;
+      --green-txt: #86efac;
+      --green-cell:#052e16;
+      --yellow-bg: #713f12;
+      --yellow-txt:#fde68a;
+      --yellow-cell:#451a03;
+      --red-bg:    #7f1d1d;
+      --red-txt:   #fca5a5;
+      --red-cell:  #450a0a;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+
+    /* ═══════════════════════════════════════
+       NAVBAR FISSA
+    ════════════════════════════════════════ */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: #0c1829;
+      border-bottom: 1px solid #2d4a6b;
+      padding: 0 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      height: 48px;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+    nav .brand {
+      font-weight: 700;
+      color: var(--accent);
+      font-size: 0.95rem;
+      flex-shrink: 0;
+      margin-right: 0.5rem;
+    }
+    nav a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.8rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      transition: color 0.15s, background 0.15s;
+      flex-shrink: 0;
+    }
+    nav a:hover { color: var(--text); background: #1e293b; }
+    nav .nav-new {
+      margin-left: auto;
+      color: var(--accent);
+      border: 1px solid #2d4a6b;
+      flex-shrink: 0;
+    }
+    nav .nav-new:hover { background: #1e3a5f; color: #7dd3fc; }
+
+    /* ═══════════════════════════════════════
+       LAYOUT
+    ════════════════════════════════════════ */
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 1.5rem 1.5rem 3rem;
+    }
+
+    /* ═══════════════════════════════════════
+       SECTION HEADER
+    ════════════════════════════════════════ */
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.85rem;
+      padding-top: 2rem;
+    }
+    .section-header h2 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+    .section-header .badge {
+      font-size: 0.7rem;
+      padding: 0.15rem 0.6rem;
+      border-radius: 999px;
+      font-weight: 500;
+    }
+    .badge-blue   { background: #0284c7; color: #e0f2fe; }
+    .badge-green  { background: #15803d; color: #dcfce7; }
+    .badge-yellow { background: #a16207; color: #fef9c3; }
+    .badge-red    { background: #b91c1c; color: #fee2e2; }
+    .badge-gray   { background: #374151; color: #d1d5db; }
+
+    /* ═══════════════════════════════════════
+       BANNER STATISTICHE RAPIDE
+    ════════════════════════════════════════ */
+    .summary-banner {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .summary-pill {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.75rem 1.25rem;
+      min-width: 130px;
+    }
+    .summary-pill .val {
+      font-size: 1.6rem;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+    .summary-pill .lbl {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 0.15rem;
+    }
+    .val-green { color: var(--green-txt); }
+    .val-red   { color: var(--red-txt); }
+    .val-yellow{ color: var(--yellow-txt); }
+    .val-blue  { color: var(--accent); }
+
+    /* ═══════════════════════════════════════
+       AVVERTIMENTI PRE-PROCESSORE
+    ════════════════════════════════════════ */
+    .warnings-box {
+      background: #1a1a2e;
+      border: 1px solid #4a1d96;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .warnings-box summary {
+      color: #c4b5fd;
+      cursor: pointer;
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+    .warnings-box ul {
+      margin-top: 0.5rem;
+      padding-left: 1.25rem;
+    }
+    .warnings-box li {
+      font-size: 0.78rem;
+      color: #a78bfa;
+      margin-bottom: 0.25rem;
+    }
+
+    /* ═══════════════════════════════════════
+       PYSPARK CODE BLOCK
+    ════════════════════════════════════════ */
+    .code-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #162032;
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: 8px 8px 0 0;
+      padding: 0.5rem 1rem;
+    }
+    .code-toolbar .code-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-family: monospace;
+    }
+    .btn-copy {
+      font-size: 0.75rem;
+      background: #0f2744;
+      color: var(--accent);
+      border: 1px solid #2d4a6b;
+      border-radius: 5px;
+      padding: 0.25rem 0.75rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-copy:hover { background: #1e3a5f; }
+    .btn-copy.copied { color: var(--green-txt); border-color: #15803d; }
+
+    pre#pyspark-output {
+      background: #030f1e;
+      color: #a5f3fc;
+      border: 1px solid var(--border);
+      border-radius: 0 0 8px 8px;
+      padding: 1.25rem;
+      font-family: "Cascadia Code", "Fira Code", "Courier New", monospace;
+      font-size: 0.78rem;
+      line-height: 1.65;
+      overflow-x: auto;
+      max-height: 600px;
+      overflow-y: auto;
+      white-space: pre;
+    }
+
+    /* Syntax highlights semplici */
+    pre#pyspark-output .kw    { color: #c084fc; }
+    pre#pyspark-output .fn    { color: #67e8f9; }
+    pre#pyspark-output .str   { color: #86efac; }
+    pre#pyspark-output .cmmt  { color: #475569; font-style: italic; }
+    pre#pyspark-output .todo  { color: #fbbf24; font-weight: bold; }
+
+    /* ═══════════════════════════════════════
+       TABELLE
+    ════════════════════════════════════════ */
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+    }
+    thead th {
+      background: #162032;
+      color: var(--text-muted);
+      font-weight: 600;
+      text-align: left;
+      padding: 0.55rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      position: sticky;
+      top: 48px;
+      z-index: 10;
+    }
+    tbody tr { border-bottom: 1px solid #1e293b; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody td {
+      padding: 0.5rem 0.75rem;
+      vertical-align: top;
+      color: #cbd5e1;
+    }
+
+    /* Color coding righe per affidabilità */
+    tr.row-alta   td { background: #071a10; }
+    tr.row-media  td { background: #1a1000; }
+    tr.row-bassa  td { background: #190606; }
+    tr.row-alta:hover td  { background: #0a2a16; }
+    tr.row-media:hover td { background: #261800; }
+    tr.row-bassa:hover td { background: #250909; }
+
+    /* Badge inline */
+    .badge-inline {
+      display: inline-block;
+      padding: 0.1rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.68rem;
+      font-weight: 600;
+    }
+    .b-si,   .b-alta   { background: var(--green-cell); color: var(--green-txt); }
+    .b-no,   .b-bassa  { background: var(--red-cell);   color: var(--red-txt); }
+    .b-media           { background: var(--yellow-cell); color: var(--yellow-txt); }
+    .b-gray            { background: #1e293b; color: var(--text-muted); }
+
+    /* Celle codice */
+    .cell-code {
+      font-family: "Cascadia Code", "Fira Code", "Courier New", monospace;
+      font-size: 0.72rem;
+      color: #a5f3fc;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-width: 420px;
+    }
+    .cell-sas {
+      font-family: "Cascadia Code", "Fira Code", "Courier New", monospace;
+      font-size: 0.72rem;
+      color: #fcd34d;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-width: 380px;
+    }
+
+    /* Accordion expand/collapse celle lunghe */
+    .expandable { position: relative; }
+    .expandable .content-short { display: block; }
+    .expandable .content-full  { display: none; }
+    .expandable.expanded .content-short { display: none; }
+    .expandable.expanded .content-full  { display: block; }
+    .btn-expand {
+      display: inline-block;
+      margin-top: 0.3rem;
+      font-size: 0.65rem;
+      color: var(--accent);
+      cursor: pointer;
+      border: none;
+      background: none;
+      padding: 0;
+    }
+    .btn-expand:hover { text-decoration: underline; }
+
+    /* ═══════════════════════════════════════
+       FILTRI
+    ════════════════════════════════════════ */
+    .filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+    .filter-row label {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .filter-row select {
+      background: #0f172a;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 0.3rem 0.6rem;
+      font-size: 0.78rem;
+      outline: none;
+    }
+    .filter-row select:focus { border-color: var(--accent); }
+    .filter-count {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    /* ═══════════════════════════════════════
+       STATISTICHE TABLE
+    ════════════════════════════════════════ */
+    tr.stats-total td {
+      font-weight: 700;
+      color: var(--text);
+      background: #162032;
+    }
+
+    /* ═══════════════════════════════════════
+       FOOTER
+    ════════════════════════════════════════ */
+    footer {
+      text-align: center;
+      padding: 1.5rem;
+      font-size: 0.72rem;
+      color: #475569;
+      border-top: 1px solid #1e293b;
+      margin-top: 2rem;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════ NAVBAR ══════════════════════ -->
+<nav>
+  <span class="brand">SAS → PySpark</span>
+  <a href="#sec-pyspark">&#128196; PySpark</a>
+  <a href="#sec-stats">&#128202; Statistiche</a>
+  <a href="#sec-blocchi">&#127881; Blocchi</a>
+  <a href="#sec-regole">&#128218; Regole</a>
+  <a href="/" class="nav-new">&#8592; Nuova conversione</a>
+</nav>
+
+<div class="container">
+
+  <!-- ══════════════════════ BANNER RIASSUNTIVO ══════════════════════ -->
+  <div class="summary-banner" style="padding-top:1.25rem">
+    <div class="summary-pill">
+      <span class="val val-blue">{{ block_count }}</span>
+      <span class="lbl">Blocchi SAS analizzati</span>
+    </div>
+    {% set conv_si = stats | selectattr('macro_categoria', 'ne', 'TOTALE') | sum(attribute='convertibile_SI') | int %}
+    {% set conv_no = stats | selectattr('macro_categoria', 'ne', 'TOTALE') | sum(attribute='convertibile_NO') | int %}
+    <div class="summary-pill">
+      <span class="val val-green">{{ conv_si }}</span>
+      <span class="lbl">Convertibili automaticamente</span>
+    </div>
+    <div class="summary-pill">
+      <span class="val val-red">{{ conv_no }}</span>
+      <span class="lbl">Richiedono revisione</span>
+    </div>
+    <div class="summary-pill">
+      <span class="val {% if todo_count > 0 %}val-yellow{% else %}val-green{% endif %}">{{ todo_count }}</span>
+      <span class="lbl">TODO nel codice PySpark</span>
+    </div>
+    <div class="summary-pill">
+      <span class="val val-blue">{{ elapsed }}s</span>
+      <span class="lbl">Tempo di elaborazione</span>
+    </div>
+  </div>
+
+  {% if pre_warnings %}
+  <details class="warnings-box">
+    <summary>&#9888; {{ pre_warnings|length }} avvertimento/i del pre-processore macro</summary>
+    <ul>
+      {% for w in pre_warnings %}<li>{{ w }}</li>{% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
+  <!-- ══════════════════════════════════════════════════════════════
+       SEZIONE 1 – CODICE PYSPARK
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="sec-pyspark">
+    <div class="section-header">
+      <h2>&#128196; Codice PySpark generato</h2>
+      {% if todo_count == 0 %}
+        <span class="badge badge-green">&#10003; Nessun TODO</span>
+      {% else %}
+        <span class="badge badge-yellow">{{ todo_count }} TODO da verificare</span>
+      {% endif %}
+    </div>
+
+    <div class="code-toolbar">
+      <span class="code-label">output.py &nbsp;·&nbsp; {{ pyspark_code.splitlines()|length }} righe</span>
+      <button class="btn-copy" onclick="copyCode(this)">&#128203; Copia</button>
+    </div>
+    <pre id="pyspark-output">{{ pyspark_code | e }}</pre>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       SEZIONE 2 – STATISTICHE
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="sec-stats">
+    <div class="section-header">
+      <h2>&#128202; Statistiche di conversione</h2>
+      <span class="badge badge-blue">per categoria</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Categoria</th>
+            <th>Totale</th>
+            <th>Conv. SI &#9989;</th>
+            <th>Conv. NO &#10060;</th>
+            <th>Affid. ALTA &#128994;</th>
+            <th>Affid. MEDIA &#128993;</th>
+            <th>Affid. BASSA &#128308;</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in stats %}
+          <tr class="{% if row.macro_categoria == 'TOTALE' %}stats-total{% endif %}">
+            <td>{{ row.macro_categoria }}</td>
+            <td>{{ row.totale_blocchi | int }}</td>
+            <td>
+              {% if row.convertibile_SI | int > 0 %}
+                <span class="badge-inline b-si">{{ row.convertibile_SI | int }}</span>
+              {% else %}–{% endif %}
+            </td>
+            <td>
+              {% if row.convertibile_NO | int > 0 %}
+                <span class="badge-inline b-no">{{ row.convertibile_NO | int }}</span>
+              {% else %}–{% endif %}
+            </td>
+            <td>
+              {% if row.affidabilita_ALTA | int > 0 %}
+                <span class="badge-inline b-alta">{{ row.affidabilita_ALTA | int }}</span>
+              {% else %}–{% endif %}
+            </td>
+            <td>
+              {% if row.affidabilita_MEDIA | int > 0 %}
+                <span class="badge-inline b-media">{{ row.affidabilita_MEDIA | int }}</span>
+              {% else %}–{% endif %}
+            </td>
+            <td>
+              {% if row.affidabilita_BASSA | int > 0 %}
+                <span class="badge-inline b-bassa">{{ row.affidabilita_BASSA | int }}</span>
+              {% else %}–{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       SEZIONE 3 – ANALISI BLOCCHI
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="sec-blocchi">
+    <div class="section-header">
+      <h2>&#127881; Analisi blocchi SAS</h2>
+      <span class="badge badge-blue">{{ blocks|length }} righe</span>
+    </div>
+
+    <div class="filter-row">
+      <label for="f-cat">Categoria:</label>
+      <select id="f-cat" onchange="filterTable()">
+        <option value="">Tutte</option>
+        {% for cat in categories %}
+        <option value="{{ cat }}">{{ cat }}</option>
+        {% endfor %}
+      </select>
+      <label for="f-conv">Convertibile:</label>
+      <select id="f-conv" onchange="filterTable()">
+        <option value="">Tutti</option>
+        <option value="SI">SI</option>
+        <option value="NO">NO</option>
+      </select>
+      <label for="f-affid">Affidabilità:</label>
+      <select id="f-affid" onchange="filterTable()">
+        <option value="">Tutte</option>
+        <option value="ALTA">ALTA</option>
+        <option value="MEDIA">MEDIA</option>
+        <option value="BASSA">BASSA</option>
+      </select>
+      <span class="filter-count" id="filter-count">{{ blocks|length }} / {{ blocks|length }} blocchi</span>
+    </div>
+
+    <div class="table-wrap">
+      <table id="blocks-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Categoria</th>
+            <th>Tipo</th>
+            <th>Righe</th>
+            <th>Depth</th>
+            <th>Conv.</th>
+            <th>Affid.</th>
+            <th>Codice SAS originale</th>
+            <th>Codice PySpark generato</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for blk in blocks %}
+          {% set affid = blk.affidabilita_auto | default('') %}
+          {% set conv  = blk.convertibile_auto  | default('') %}
+          {% set row_class = 'row-alta' if affid == 'ALTA' else ('row-media' if affid == 'MEDIA' else 'row-bassa') %}
+          <tr class="{{ row_class }}"
+              data-cat="{{ blk.macro_categoria }}"
+              data-conv="{{ conv }}"
+              data-affid="{{ affid }}">
+            <td style="color:#64748b;white-space:nowrap">{{ loop.index }}</td>
+            <td><span class="badge-inline b-gray">{{ blk.macro_categoria }}</span></td>
+            <td style="max-width:180px;word-break:break-word;font-size:0.72rem;color:#94a3b8">{{ blk.tipo }}</td>
+            <td style="white-space:nowrap;color:#64748b">
+              {{ blk.linea_start }}–{{ blk.linea_stop }}
+            </td>
+            <td style="color:#64748b">{{ blk.depth }}</td>
+            <td>
+              <span class="badge-inline {{ 'b-si' if conv == 'SI' else 'b-no' }}">{{ conv }}</span>
+            </td>
+            <td>
+              <span class="badge-inline {{ 'b-alta' if affid == 'ALTA' else ('b-media' if affid == 'MEDIA' else 'b-bassa') }}">
+                {{ affid }}
+              </span>
+            </td>
+
+            <!-- Codice SAS -->
+            <td>
+              {% set sas_text = blk.testo | default('') %}
+              {% if sas_text | length > 300 %}
+              <div class="expandable">
+                <span class="cell-sas content-short">{{ sas_text[:300] | e }}…</span>
+                <span class="cell-sas content-full">{{ sas_text | e }}</span>
+                <button class="btn-expand" onclick="toggleExpand(this)">&#9660; espandi</button>
+              </div>
+              {% else %}
+              <span class="cell-sas">{{ sas_text | e }}</span>
+              {% endif %}
+            </td>
+
+            <!-- Codice PySpark per blocco -->
+            <td>
+              {% set py_text = blk.codice_pyspark | default('') %}
+              {% if py_text and py_text | length > 300 %}
+              <div class="expandable">
+                <span class="cell-code content-short">{{ py_text[:300] | e }}…</span>
+                <span class="cell-code content-full">{{ py_text | e }}</span>
+                <button class="btn-expand" onclick="toggleExpand(this)">&#9660; espandi</button>
+              </div>
+              {% elif py_text %}
+              <span class="cell-code">{{ py_text | e }}</span>
+              {% else %}
+              <span style="color:#334155">–</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       SEZIONE 4 – REGOLE DI CLASSIFICAZIONE
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="sec-regole">
+    <div class="section-header">
+      <h2>&#128218; Regole di classificazione</h2>
+      <span class="badge badge-gray">{{ rules|length }} regole</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Tipo blocco</th>
+            <th>Categoria</th>
+            <th>Nome regola</th>
+            <th>Logica</th>
+            <th>Parole chiave</th>
+            <th>Convertibile</th>
+            <th>Affidabilità</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rule in rules %}
+          <tr>
+            <td style="color:#64748b">{{ rule.ordine }}</td>
+            <td style="color:#94a3b8">{{ rule.blk_name }}</td>
+            <td><span class="badge-inline b-gray">{{ rule.macro_categoria }}</span></td>
+            <td style="max-width:220px;word-break:break-word">{{ rule.nome_regola }}</td>
+            <td style="color:#7dd3fc;font-family:monospace;font-size:0.72rem">{{ rule.logica }}</td>
+            <td style="max-width:200px;word-break:break-word;font-size:0.72rem;color:#94a3b8">{{ rule.keywords }}</td>
+            <td>
+              <span class="badge-inline {{ 'b-si' if rule.convertibile == 'SI' else 'b-no' }}">
+                {{ rule.convertibile }}
+              </span>
+            </td>
+            <td>
+              <span class="badge-inline {{ 'b-alta' if rule.affidabilita == 'ALTA' else ('b-media' if rule.affidabilita == 'MEDIA' else 'b-bassa') }}">
+                {{ rule.affidabilita }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<footer>
+  SAS → PySpark Converter v{{ version }} &nbsp;|&nbsp;
+  Elaborato in {{ elapsed }}s &nbsp;|&nbsp;
+  <a href="{{ repo }}" target="_blank">GitHub</a> &nbsp;|&nbsp;
+  <a href="/">Nuova conversione</a>
+</footer>
+
+<script>
+/* ── COPIA CODICE ── */
+function copyCode(btn) {
+  const code = document.getElementById('pyspark-output').textContent;
+  navigator.clipboard.writeText(code).then(() => {
+    btn.textContent = '✓ Copiato!';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = '📋 Copia';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+
+/* ── ACCORDION EXPAND/COLLAPSE ── */
+function toggleExpand(btn) {
+  const wrap = btn.closest('.expandable');
+  wrap.classList.toggle('expanded');
+  btn.textContent = wrap.classList.contains('expanded')
+    ? '▲ comprimi'
+    : '▼ espandi';
+}
+
+/* ── FILTRI TABELLA BLOCCHI ── */
+function filterTable() {
+  const cat   = document.getElementById('f-cat').value.toLowerCase();
+  const conv  = document.getElementById('f-conv').value.toLowerCase();
+  const affid = document.getElementById('f-affid').value.toLowerCase();
+
+  const rows  = document.querySelectorAll('#blocks-table tbody tr');
+  let visible = 0;
+
+  rows.forEach(tr => {
+    const trCat   = (tr.dataset.cat   || '').toLowerCase();
+    const trConv  = (tr.dataset.conv  || '').toLowerCase();
+    const trAffid = (tr.dataset.affid || '').toLowerCase();
+
+    const show = (
+      (!cat   || trCat   === cat)   &&
+      (!conv  || trConv  === conv)  &&
+      (!affid || trAffid === affid)
+    );
+    tr.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+
+  document.getElementById('filter-count').textContent =
+    visible + ' / ' + rows.length + ' blocchi';
+}
+
+/* ── SYNTAX HIGHLIGHT LEGGERO ── */
+(function highlightPySpark() {
+  const pre = document.getElementById('pyspark-output');
+  if (!pre) return;
+
+  let html = pre.textContent
+    /* TODO lines → giallo */
+    .replace(/(^.*# TODO.*$)/gm, '<span class="todo">$1</span>')
+    /* commenti # → grigio (non TODO) */
+    .replace(/(^[ \t]*#(?!.*TODO).*$)/gm, '<span class="cmmt">$1</span>')
+    /* stringhe """...""" e '...' */
+    .replace(/("""[\s\S]*?""")/g, '<span class="str">$1</span>')
+    .replace(/('(?:[^'\\]|\\.)*')/g, '<span class="str">$1</span>')
+    /* keywords Python */
+    .replace(/\b(def|class|return|if|else|elif|for|while|import|from|as|with|try|except|finally|pass|True|False|None)\b/g,
+             '<span class="kw">$1</span>');
+
+  pre.innerHTML = html;
+})();
+</script>
+
+</body>
+</html>
