@@ -1,7 +1,7 @@
 # Deploy su Azure VM – SAS → PySpark Converter + Ollama
 
 Guida completa da A a Z per avviare il convertitore web con LLM locale (Ollama)
-su una macchina virtuale Azure.
+su una macchina virtuale Azure, **senza docker-compose**.
 
 ---
 
@@ -65,11 +65,13 @@ sudo apt-get update && sudo apt-get upgrade -y
 ### Step 2 — Installazione Docker
 
 ```bash
-sudo apt-get install -y docker.io docker-compose-plugin git
+sudo apt-get install -y docker.io git
 sudo systemctl enable --now docker
 sudo usermod -aG docker $USER
 newgrp docker
 ```
+
+> **Nota:** Non e' necessario installare docker-compose. Si usa solo `docker` standard.
 
 ### Step 3 — Installazione Ollama + download modello
 
@@ -106,25 +108,51 @@ cd sas-pyspark-conversion
 git checkout main
 ```
 
-### Step 5 — Build e avvio
+### Step 5 — Build e avvio (con run.sh)
 
 ```bash
-docker compose up -d --build
+# Rendi lo script eseguibile
+chmod +x run.sh
+
+# Build dell'immagine + avvio del container
+./run.sh rebuild
 ```
 
 Questo comando:
 1. Costruisce l'immagine Docker (Python 3.11 + Flask + pandas)
 2. Avvia il container sulla porta 80
 3. Si connette automaticamente a Ollama via `host.docker.internal:11434`
+4. Configura il riavvio automatico in caso di crash o reboot
+
+**In alternativa, i comandi manuali equivalenti:**
+
+```bash
+# Build
+docker build -t sas-converter:latest .
+
+# Avvio
+docker run -d \
+  --name sas-pyspark-web \
+  --restart unless-stopped \
+  --add-host host.docker.internal:host-gateway \
+  -p 80:5000 \
+  -e FLASK_ENV=production \
+  -e PORT=5000 \
+  -e OLLAMA_HOST=http://host.docker.internal:11434 \
+  -e OLLAMA_MODEL=codestral \
+  -v "$(pwd)/output:/app/output" \
+  -v "$(pwd)/INPUT:/app/INPUT:ro" \
+  sas-converter:latest
+```
 
 ### Step 6 — Verifica
 
 ```bash
-# Controlla lo stato del container
-docker compose ps
+# Stato del container
+docker ps
 
-# Controlla i log dell'applicazione
-docker compose logs -f
+# Log dell'applicazione
+docker logs -f sas-pyspark-web
 
 # Test health check (include status Ollama)
 curl http://localhost/health
@@ -133,6 +161,9 @@ curl http://localhost/health
 # Test diretto Ollama dall'host
 curl http://localhost:11434/api/tags
 # Risposta attesa: {"models":[{"name":"codestral:latest",...}]}
+
+# Oppure con lo script
+./run.sh status
 ```
 
 ### Step 7 — Apertura porta 80 nell'NSG Azure
@@ -169,63 +200,98 @@ Nella pagina:
 
 ---
 
-## 4. Cambiare il modello Ollama
+## 4. Comandi run.sh
+
+```bash
+./run.sh            # avvia (build automatico se immagine assente)
+./run.sh rebuild    # forza rebuild completo e riavvio
+./run.sh stop       # ferma e rimuove il container
+./run.sh logs       # log in tempo reale
+./run.sh status     # stato + health check
+./run.sh build      # solo build immagine
+```
+
+---
+
+## 5. Cambiare il modello Ollama
 
 ```bash
 # Scarica un altro modello
 ollama pull deepseek-coder:6.7b
 
-# Aggiorna la variabile nel docker-compose.yml:
-#   OLLAMA_MODEL=deepseek-coder:6.7b
-# Oppure direttamente:
-docker compose down
-OLLAMA_MODEL=deepseek-coder:6.7b docker compose up -d
+# Riavvia con il nuovo modello
+./run.sh stop
+OLLAMA_MODEL=deepseek-coder:6.7b ./run.sh start
 ```
 
-Per rendere il cambio permanente, modifica `docker-compose.yml`:
+Oppure con i comandi manuali:
 
-```yaml
-environment:
-  - OLLAMA_MODEL=deepseek-coder:6.7b
+```bash
+docker rm -f sas-pyspark-web
+
+docker run -d \
+  --name sas-pyspark-web \
+  --restart unless-stopped \
+  --add-host host.docker.internal:host-gateway \
+  -p 80:5000 \
+  -e FLASK_ENV=production \
+  -e PORT=5000 \
+  -e OLLAMA_HOST=http://host.docker.internal:11434 \
+  -e OLLAMA_MODEL=deepseek-coder:6.7b \
+  -v "$(pwd)/output:/app/output" \
+  -v "$(pwd)/INPUT:/app/INPUT:ro" \
+  sas-converter:latest
 ```
 
 ---
 
-## 5. Aggiornamento dell'applicazione
+## 6. Aggiornamento dell'applicazione
 
 ```bash
 cd sas-pyspark-conversion
 git pull origin main
-docker compose up -d --build
+./run.sh rebuild
 ```
 
 ---
 
-## 6. Comandi Docker utili
+## 7. Comandi Docker utili
 
 ```bash
-# Avvia in background
-docker compose up -d
+# Lista container in esecuzione
+docker ps
 
-# Arresta
-docker compose stop
+# Lista tutti i container (anche fermi)
+docker ps -a
 
-# Arresta e rimuovi container
-docker compose down
+# Log in tempo reale
+docker logs -f sas-pyspark-web
 
-# Visualizza i log in tempo reale
-docker compose logs -f sas-converter
+# Ferma il container
+docker stop sas-pyspark-web
+
+# Avvia il container fermato
+docker start sas-pyspark-web
+
+# Rimuovi il container
+docker rm -f sas-pyspark-web
 
 # Accedi alla shell del container (debug)
-docker compose exec sas-converter bash
+docker exec -it sas-pyspark-web bash
 
-# Forza rebuild completo
-docker compose up -d --build --force-recreate
+# Statistiche CPU/RAM
+docker stats sas-pyspark-web
+
+# Lista immagini
+docker images
+
+# Rimuovi immagine vecchia
+docker rmi sas-converter:latest
 ```
 
 ---
 
-## 7. Comandi Ollama utili
+## 8. Comandi Ollama utili
 
 ```bash
 # Lista modelli installati
@@ -252,7 +318,7 @@ sudo journalctl -u ollama -f
 
 ---
 
-## 8. HTTPS con Nginx (opzionale, produzione)
+## 9. HTTPS con Nginx (opzionale, produzione)
 
 ```bash
 sudo apt-get install -y nginx certbot python3-certbot-nginx
@@ -279,11 +345,11 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d tuo-dominio.example.com
 ```
 
-Con Nginx, aggiorna `docker-compose.yml`: cambia `"80:5000"` in `"5000:5000"`.
+Con Nginx, cambia la porta nel `docker run`: sostituisci `-p 80:5000` con `-p 5000:5000`.
 
 ---
 
-## 9. Monitoraggio risorse
+## 10. Monitoraggio risorse
 
 ```bash
 # CPU/RAM del container Flask
@@ -298,15 +364,16 @@ du -sh ~/.ollama/models/
 
 ---
 
-## 10. Risoluzione problemi
+## 11. Risoluzione problemi
 
 | Problema | Causa | Soluzione |
 |---|---|---|
-| `{"ollama": false}` nel health check | Ollama non raggiungibile dal container | Verifica: `sudo systemctl status ollama` e che `OLLAMA_HOST` sia corretto nel docker-compose.yml |
+| `{"ollama": false}` nel health check | Ollama non raggiungibile dal container | Verifica: `sudo systemctl status ollama` e che `--add-host host.docker.internal:host-gateway` sia presente nel `docker run` |
 | Porta 80 non accessibile | NSG non configurato | Aggiungi regola inbound porta 80 nell'NSG Azure |
 | Ollama risponde lentamente | RAM insufficiente | Usa un modello piu' leggero o una VM con piu' RAM |
-| `docker compose up` fallisce | Docker non nel gruppo | Esegui `sudo usermod -aG docker $USER && newgrp docker` |
+| `docker: permission denied` | Utente non nel gruppo docker | Esegui `sudo usermod -aG docker $USER && newgrp docker` |
 | Errore "model not found" in Ollama | Modello non scaricato | Esegui `ollama pull codestral` |
-| Container si riavvia in loop | Errore Python | Esegui `docker compose logs -f` per vedere l'errore |
+| Container si riavvia in loop | Errore Python | Esegui `docker logs sas-pyspark-web` per vedere l'errore |
 | Conversione timeout | File SAS troppo grande | Aumenta `MAX_CONTENT_LENGTH` in webapp.py |
 | Ollama usa troppa RAM | Modello troppo grande | Passa a `deepseek-coder:6.7b` (4GB) o `mistral:7b` |
+| Container non si riavvia dopo reboot | Flag `--restart` assente | Aggiungi `--restart unless-stopped` nel comando `docker run` |
