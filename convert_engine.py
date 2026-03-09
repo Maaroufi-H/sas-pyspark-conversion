@@ -41,6 +41,9 @@ class ConversionContext:
     macro_params: List[str] = field(default_factory=list)   # ex: ["flusso"]
     macro_vars: Dict[str, str] = field(default_factory=dict)   # "&var" → py_expr
     available_dfs: Dict[str, str] = field(default_factory=dict) # sas_name → py_var
+    # Traccia le liste collezionate da blocchi INTO :var1-
+    # chiave = nome base (es. "id_prodotto"), valore = nome variabile Python (es. "id_prodotto_list")
+    into_lists: Dict[str, str] = field(default_factory=dict)
     function_name: Optional[str] = None  # nome della funzione Python corrente
     spark_session_var: str = "spark"     # nome della variabile SparkSession
     llm_backend: object = None           # OllamaConverter | CodestralConverter | None
@@ -55,6 +58,7 @@ class ConversionContext:
             macro_params=list(self.macro_params),
             macro_vars=dict(self.macro_vars),
             available_dfs=dict(self.available_dfs),
+            into_lists=dict(self.into_lists),
             function_name=self.function_name,
             spark_session_var=self.spark_session_var,
             llm_backend=self.llm_backend,
@@ -69,21 +73,68 @@ class ConversionContext:
         """Registra un dataset SAS → variabile Python nel contesto."""
         self.available_dfs[_sas_to_py_var(sas_name)] = py_var
 
+    def register_into_list(self, base_name: str, list_var: str) -> None:
+        """Registra una lista Python generata da INTO :base1- nel contesto.
+
+        Permette ai blocchi successivi di riutilizzarla nelle clausole IN.
+        Esempio: INTO :id_prodotto1-  →  base="id_prodotto", list_var="id_prodotto_list"
+        """
+        self.into_lists[base_name.lower()] = list_var
+
+    def find_into_list_for_macro_block(self, macro_block: str) -> Optional[str]:
+        """Cerca una lista Python che corrisponde ai pattern &&base&i nel blocco macro.
+
+        Esempio: macro_block contiene '&&id_prodotto&i' → cerca 'id_prodotto' in into_lists
+        Restituisce il nome della variabile lista se trovata, altrimenti None.
+        """
+        # Estrae i nomi base dai pattern &&nome&i  (doppio-ampersand con indice variabile)
+        for m in re.finditer(r'&&(\w+?)(?:\d+)?&\w+', macro_block, re.I):
+            base = m.group(1).lower().rstrip('_')
+            if base in self.into_lists:
+                return self.into_lists[base]
+        # Cerca anche pattern &&nome1 (con numero letterale)
+        for m in re.finditer(r'&&(\w+?)(\d+)', macro_block, re.I):
+            base = m.group(1).lower().rstrip('_')
+            if base in self.into_lists:
+                return self.into_lists[base]
+        return None
+
     def resolve_df(self, sas_name: str) -> str:
         """Risolve un nome di dataset SAS → variabile Python disponibile."""
         key = _sas_to_py_var(sas_name)
         return self.available_dfs.get(key, key)
 
     def resolve_macro_var(self, text: str) -> str:
-        """Sostituisce i riferimenti macro &var. con il loro equivalente Python."""
-        def _replace(m: re.Match) -> str:
+        """Sostituisce i riferimenti macro &var. con il loro equivalente Python.
+
+        Gestisce due casi:
+          - singolo ampersand  : &var   → valore diretto
+          - doppio  ampersand  : &&var&i → risoluzione in due passate (come SAS)
+              Passata 1: &&name → &name  (rimozione di un &)
+              Passata 2: &name  → valore Python
+
+        Esempio SAS:  &&id_prodotto&i  (con i=2)
+          Passata 1 → &id_prodotto&i
+          Passata 2 → &id_prodotto2  → id_prodotto_list[1]
+        """
+        def _replace_single(m: re.Match) -> str:
             var = m.group(1).lower()
             if var in self.macro_vars:
                 return self.macro_vars[var]
             if var in [p.lower() for p in self.macro_params]:
                 return var  # parametro di funzione Python → stesso nome
             return f"TODO_MACRO_VAR_{var.upper()}"
-        return re.sub(r'&(\w+)\.?', _replace, text)
+
+        # Passata 1: &&name → &name  (il doppio-& SAS richiede due risoluzioni)
+        # Converte &&word in un placeholder temporaneo per evitare doppia sostituzione
+        text = re.sub(r'&&(\w+)', r'__DBLAMP__\1', text)
+        # Passata 2: sostituisce &var singolo
+        text = re.sub(r'&(\w+)\.?', _replace_single, text)
+        # Ripristina i placeholder __DBLAMP__x → vengono ora risolti come &x singolo
+        text = re.sub(r'__DBLAMP__(\w+)', r'&\1', text)
+        # Terza passata: risolve i &x rimasti dal doppio-ampersand
+        text = re.sub(r'&(\w+)\.?', _replace_single, text)
+        return text
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -121,7 +172,8 @@ class ProcSqlInfo:
     group_by: Optional[str] = None
     having: Optional[str] = None
     order_by: Optional[str] = None
-    into_var: Optional[str] = None          # INTO :macrovar
+    into_var: Optional[str] = None          # INTO :macrovar  (scalare)
+    into_var_is_list: bool = False          # True se INTO :var1-  (lista SAS, es. :id_prodotto1-)
     create_table: Optional[str] = None      # CREATE TABLE name AS
     joins: List[Tuple[str, str, str]] = field(default_factory=list)  # (type, table, condition)
     has_dynamic_sql: bool = False           # %str %sysfunc etc.
@@ -543,10 +595,19 @@ def _analyse_proc_sql(testo: str) -> ProcSqlInfo:
     if m_hav:
         info.having = re.sub(r'\s+', ' ', m_hav.group(1)).strip().rstrip(';')
 
-    # INTO :var (creazione di variabile macro)
-    m_into = re.search(r'\binto\s+:(\w+)', body, re.I)
+    # INTO :var  (scalare)  oppure  INTO :var1-  (lista di variabili macro)
+    # Il trattino finale nel pattern SAS indica una serie: :var1- crea :var1, :var2, ... :varN
+    m_into = re.search(r'\binto\s+:(\w+?)(\d*)\s*(-)', body, re.I)
     if m_into:
-        info.into_var = m_into.group(1).strip()
+        # Caso lista: into :id_prodotto1-  → base="id_prodotto", numerico=True
+        base = re.sub(r'\d+$', '', m_into.group(1) + m_into.group(2))
+        info.into_var = base
+        info.into_var_is_list = True
+    else:
+        m_into_scalar = re.search(r'\binto\s+:(\w+)', body, re.I)
+        if m_into_scalar:
+            info.into_var = m_into_scalar.group(1).strip()
+            info.into_var_is_list = False
 
     return info
 
@@ -910,20 +971,32 @@ def convert_proc_sql(
 
     # ── Genera variabili Python per le liste IN da macro SAS ─────────
     # Pattern: WHERE col IN (%if &n=1 %then %do; val1 %end; %else %do i=1 %to &n; ...)
-    # Converte in: _col_values = []  # TODO + df.filter(F.col("col").isin(_col_values))
+    # Strategia 1 (preferita): se esiste già una lista raccolta da INTO :var1- nel contesto,
+    #   riutilizzarla direttamente → .filter(F.col(col).isin(existing_list_var))
+    # Strategia 2 (fallback): genera _col_values = []  con commento TODO
     isin_filters = []
     for col_name, macro_block in info.macro_in_lists:
-        py_list_var = f"_{col_name.lower()}_values"
-        # Estrae suggerimento sui nomi delle variabili macro usate nel blocco
-        macro_var_hints = sorted(set(re.findall(r'&{1,2}(\w+)', macro_block)))
-        hint_str = ", ".join(f"&{v}" for v in macro_var_hints) if macro_var_hints else "variabili macro SAS"
-        lines += [
-            f"{pad}# LISTA IN generata da macro SAS per la colonna '{col_name}':",
-            f"{pad}# SAS usa un loop %do per costruire i valori a runtime.",
-            f"{pad}# Variabili macro da risolvere: {hint_str}",
-            f"{pad}{py_list_var} = []  # TODO: popola con i valori delle variabili macro",
-        ]
-        isin_filters.append((col_name, py_list_var))
+        # Cerca se esiste una lista INTO compatibile nel contesto
+        existing_list = ctx.find_into_list_for_macro_block(macro_block)
+        if existing_list:
+            # Lista già disponibile: uso diretto senza TODO
+            lines += [
+                f"{pad}# LISTA IN per '{col_name}': usa la lista raccolta dal blocco INTO precedente",
+                f"{pad}# SAS: &&id_prodotto&i  →  Python: {existing_list}",
+            ]
+            isin_filters.append((col_name, existing_list))
+        else:
+            # Lista sconosciuta: genera placeholder con TODO e tutti gli hint possibili
+            py_list_var = f"_{col_name.lower()}_values"
+            macro_var_hints = sorted(set(re.findall(r'&{1,2}(\w+)', macro_block)))
+            hint_str = ", ".join(f"&{v}" for v in macro_var_hints) if macro_var_hints else "variabili macro SAS"
+            lines += [
+                f"{pad}# LISTA IN per '{col_name}': generata da macro SAS a runtime.",
+                f"{pad}# Variabili macro da risolvere: {hint_str}",
+                f"{pad}# Popola questa lista con i valori corrispondenti ai parametri SAS.",
+                f"{pad}{py_list_var} = []  # TODO: popola con i valori di {hint_str}",
+            ]
+            isin_filters.append((col_name, py_list_var))
 
     # Estrae il SQL grezzo e crea una variabile
     py_out = _sas_to_py_var(info.create_table) if info.create_table else "df_sql"
@@ -961,10 +1034,33 @@ def convert_proc_sql(
             f"{pad}# NOTA: le condizioni IN con macro SAS sono applicate via .filter().isin() dopo la query"
         )
 
-    if info.into_var:
+    if info.into_var and info.into_var_is_list:
+        # SAS: INTO :var1-  →  crea una lista Python + variabile contatore (come &sqlobs)
+        # Equivalente a: SELECT DISTINCT col INTO :var1- FROM ...
+        # In PySpark: raccoglie tutti i valori distinti in una lista Python
+        list_var = f"{info.into_var}_list"
+        count_var = f"n_{info.into_var}"
+        # Rimuove la sintassi INTO dal SQL grezzo (non valida in Spark SQL)
+        raw_no_into = re.sub(
+            r'\binto\s+:\w+\s*-\s*', '', raw, flags=re.I
+        ).strip()
         lines += [
-            f"{pad}# INTO :{info.into_var} → variable Python",
-            f"{pad}_df_into = {ctx.spark_session_var}.sql(\"\"\"{raw}\"\"\")",
+            f"{pad}# INTO :{info.into_var}1-  →  lista Python + contatore (equivalente a &sqlobs)",
+            f"{pad}_df_into = {ctx.spark_session_var}.sql(\"\"\"{raw_no_into}\"\"\")",
+            f"{pad}{list_var} = [row[0] for row in _df_into.collect()]",
+            f"{pad}{count_var} = len({list_var})",
+            f"{pad}# Accesso singolo elemento: {info.into_var}_list[0], {info.into_var}_list[1], ...",
+        ]
+        # Registra la lista nel contesto: i blocchi SQL successivi la useranno in .isin()
+        ctx.register_into_list(info.into_var, list_var)
+    elif info.into_var:
+        # Scalare: INTO :var  →  primo valore della prima riga
+        raw_no_into = re.sub(
+            r'\binto\s+:\w+\s*', '', raw, flags=re.I
+        ).strip()
+        lines += [
+            f"{pad}# INTO :{info.into_var}  →  variabile Python scalare",
+            f"{pad}_df_into = {ctx.spark_session_var}.sql(\"\"\"{raw_no_into}\"\"\")",
             f"{pad}{info.into_var} = _df_into.collect()[0][0]",
         ]
     elif info.create_table:

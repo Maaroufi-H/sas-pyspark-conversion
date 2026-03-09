@@ -4,14 +4,21 @@ process_input.py
 Processa tutti i file .sas trovati nella cartella INPUT/ e produce gli
 output nella cartella output/<YYYYMMDD_HHMMSS>_<nome>/ contenente:
 
-    <nome>.sas     -> copia del file SAS originale
-    <nome>.py      -> script PySpark convertito
-    <nome>.json    -> albero dei blocchi SAS (intermedio)
-    <nome>.xlsx    -> report Excel di analisi
+    <nome>.sas          -> copia del file SAS originale
+    <nome>.resolved.sas -> file SAS dopo il pre-processore Livello 2 (opzionale)
+    <nome>.py           -> script PySpark convertito
+    <nome>.json         -> albero dei blocchi SAS (intermedio)
+    <nome>.xlsx         -> report Excel di analisi
 
 Utilizzo:
     # Processa tutti i file nuovi (non ancora convertiti)
     python process_input.py
+
+    # Abilita il pre-processore macro Livello 2 prima della conversione
+    python process_input.py --preprocess
+
+    # Pre-processore con variabili macro note (es. nid=3, livAgregg=1)
+    python process_input.py --preprocess --macro-vars nid=3 livAgregg=1
 
     # Forza la riconversione anche di file già processati
     python process_input.py --force
@@ -34,6 +41,7 @@ from pathlib import Path
 
 # ── import dal pipeline esistente ────────────────────────────────────
 from run_converter import convert_sas_file
+from sas_macro_preprocessor import preprocess_sas_file
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -59,12 +67,25 @@ def run(
     output_root: Path,
     force: bool = False,
     verbose: bool = True,
+    preprocess: bool = False,
+    macro_vars: dict | None = None,
 ) -> list[Path]:
     """
     Processa tutti i .sas in input_dir.
     Ritorna la lista delle cartelle di output create.
+
+    Parametri
+    ---------
+    preprocess : bool
+        Se True, esegue il pre-processore macro Livello 2 prima della conversione.
+        Produce un file <nome>.resolved.sas usato come input reale per il convertitore.
+    macro_vars : dict, opzionale
+        Variabili macro note (es. {"nid": "3", "livAgregg": "1"}).
+        Usato solo se preprocess=True.
     """
     sas_files = sorted(input_dir.rglob("*.sas"))
+    # Esclude i file già risolti dal pre-processore
+    sas_files = [f for f in sas_files if not f.name.endswith(".resolved.sas")]
 
     if not sas_files:
         print(f"[INFO] Nessun file .sas trovato in: {input_dir}")
@@ -93,10 +114,29 @@ def run(
         # 1. Copia il file SAS originale nella cartella di output
         shutil.copy2(sas_path, out_dir / sas_path.name)
 
-        # 2. Esegui la conversione (py + json + xlsx)
+        # 2. [Livello 2] Pre-processore macro (opzionale)
+        sas_input_for_conversion = sas_path
+        if preprocess:
+            resolved_path = out_dir / f"{stem}.resolved.sas"
+            print(f"  [0/3] Pre-processore macro Livello 2...")
+            try:
+                _, pre_warnings = preprocess_sas_file(
+                    input_path=sas_path,
+                    output_path=resolved_path,
+                    known_vars=macro_vars,
+                )
+                sas_input_for_conversion = resolved_path
+                if verbose and pre_warnings:
+                    for w in pre_warnings:
+                        print(f"        {w}")
+                print(f"        -> {resolved_path.name}  ({resolved_path.stat().st_size // 1024 + 1} KB)")
+            except Exception as exc:
+                print(f"  [WARN] Pre-processore fallito: {exc} — uso il file originale", file=sys.stderr)
+
+        # 3. Esegui la conversione (py + json + xlsx)
         try:
             convert_sas_file(
-                sas_path=sas_path,
+                sas_path=sas_input_for_conversion,
                 output_dir=out_dir,
                 excel=True,
                 json_intermediate=True,
@@ -105,8 +145,6 @@ def run(
             created.append(out_dir)
         except Exception as exc:
             print(f"[ERRORE] Conversione fallita per {sas_path.name}: {exc}", file=sys.stderr)
-            # Lascia la cartella così com'è per debug; rimuovi il .py mancante
-            # così il file non risulta "già processato"
 
     return created
 
@@ -145,6 +183,24 @@ def main() -> None:
         action="store_true",
         help="Output minimale",
     )
+    parser.add_argument(
+        "--preprocess", "-p",
+        action="store_true",
+        help=(
+            "Esegui il pre-processore macro Livello 2 prima della conversione.\n"
+            "Risolve &&var&i, srotola loop %do, produce <nome>.resolved.sas."
+        ),
+    )
+    parser.add_argument(
+        "--macro-vars", "-m",
+        nargs="*",
+        metavar="VAR=VALORE",
+        default=[],
+        help=(
+            "Variabili macro note (usate con --preprocess).\n"
+            "Esempio: --macro-vars nid=3 livAgregg=1 path_excel=/data/excel"
+        ),
+    )
     args = parser.parse_args()
 
     if not args.input_dir.exists():
@@ -153,11 +209,22 @@ def main() -> None:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Costruisce il dizionario di variabili macro da riga di comando
+    macro_vars: dict = {}
+    for kv in (args.macro_vars or []):
+        if "=" in kv:
+            k, v = kv.split("=", 1)
+            macro_vars[k.strip().lower()] = v.strip()
+        else:
+            print(f"[WARN] Formato non valido per --macro-vars: '{kv}' (atteso VAR=VALORE)", file=sys.stderr)
+
     created = run(
         input_dir=args.input_dir,
         output_root=args.output_dir,
         force=args.force,
         verbose=not args.quiet,
+        preprocess=args.preprocess,
+        macro_vars=macro_vars or None,
     )
 
     print(f"\n[DONE] Cartelle create: {len(created)}")
