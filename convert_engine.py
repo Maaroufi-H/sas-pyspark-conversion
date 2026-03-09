@@ -1436,7 +1436,7 @@ class LLMFallback:
     Segnaposto per l'integrazione futura di un motore LLM.
 
     Utilizzo previsto:
-        llm = LLMFallback(api_key="...", model="claude-opus-4-6")
+        llm = LLMFallback(api_key="...", model="gpt-4o")
         code = llm.convert_block(blk["testo"], context_hint="DATA step con RETAIN")
 
     Protocollo:
@@ -1447,7 +1447,7 @@ class LLMFallback:
           di apprendimento per fine-tuning o few-shot futuro
     """
 
-    def __init__(self, api_key: str = "", model: str = "claude-opus-4-6"):
+    def __init__(self, api_key: str = "", model: str = "gpt-4o"):
         self.api_key = api_key
         self.model   = model
         self.enabled = bool(api_key)
@@ -1461,10 +1461,10 @@ class LLMFallback:
         if not self.enabled:
             return None  # il motore rule-based mantiene il controllo
 
-        # TODO: chiamare l'API Anthropic Claude qui
+        # TODO: chiamare l'API LLM qui
         # prompt = self._build_prompt(sas_code, context_hint)
-        # response = anthropic.Anthropic(api_key=self.api_key).messages.create(...)
-        # return response.content[0].text
+        # response = openai.OpenAI(api_key=self.api_key).chat.completions.create(...)
+        # return response.choices[0].message.content
         raise NotImplementedError("LLM integration: vedere TODO in llm_integration.py")
 
     def record_correction(

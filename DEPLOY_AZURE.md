@@ -52,7 +52,7 @@ git clone https://github.com/Maaroufi-H/sas-pyspark-conversion.git
 cd sas-pyspark-conversion
 
 # Passa al branch con la webapp
-git checkout claude/webapp-docker-h8NEE
+git checkout main
 
 # ── 4. Avvia il servizio ────────────────────────────────────
 docker compose up -d --build
@@ -88,7 +88,7 @@ http://<IP-PUBBLICO-VM>/
 cd sas-pyspark-conversion
 
 # Scarica le ultime modifiche
-git pull origin claude/webapp-docker-h8NEE
+git pull origin main
 
 # Rebuild e restart
 docker compose up -d --build
