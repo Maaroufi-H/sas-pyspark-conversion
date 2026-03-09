@@ -264,6 +264,14 @@
               <span class="hint">(risolve &&var&i, srotola %do)</span>
             </label>
           </div>
+          <div class="checkbox-row" style="margin-top:0.6rem">
+            <input type="checkbox" id="use_llm" name="use_llm" value="1"
+              {% if request.form.get('use_llm') %}checked{% endif %}>
+            <label for="use_llm">
+              Usa LLM Ollama
+              <span class="hint">(fallback per blocchi non convertibili)</span>
+            </label>
+          </div>
         </div>
         <div class="option-group">
           <label for="macro_vars">Variabili macro note

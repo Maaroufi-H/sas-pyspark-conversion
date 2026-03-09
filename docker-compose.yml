@@ -31,9 +31,16 @@ services:
       # INPUT: monta la cartella SAS sorgente (opzionale)
       - ./INPUT:/app/INPUT:ro
 
+    # Permette al container di raggiungere Ollama sulla VM host
+    # L'app Flask usa OLLAMA_HOST per connettersi al LLM locale
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
     environment:
       - FLASK_ENV=production
       - PORT=5000
+      # Ollama gira sull'host (fuori dal container) → raggiungibile via host.docker.internal
+      - OLLAMA_HOST=http://host.docker.internal:11434
 
     # Restart automatico in caso di crash o reboot della VM
     restart: unless-stopped

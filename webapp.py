@@ -35,6 +35,7 @@ from trova_sas3_tracker import (
 )
 from convert_engine import convert_tree, convert_blocks_to_map
 from sas_macro_preprocessor import SASMacroPreprocessor
+from llm_local import create_llm_backend
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -49,6 +50,32 @@ _REPO    = "https://github.com/Maaroufi-H/sas-pyspark-conversion"
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# BACKEND LLM (Ollama locale, opzionale)
+# ═══════════════════════════════════════════════════════════════════════
+# Se la variabile d'ambiente OLLAMA_HOST è definita (es. dal docker-compose),
+# tenta la connessione a Ollama all'avvio. Se Ollama non è disponibile,
+# l'app funziona comunque con le sole regole deterministiche.
+_OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+_LLM_BACKEND = None
+
+def _init_llm_backend():
+    """Inizializza il backend LLM (Ollama) se disponibile."""
+    global _LLM_BACKEND
+    _LLM_BACKEND = create_llm_backend(
+        strategy="ollama",
+        ollama_host=_OLLAMA_HOST,
+        ollama_model=os.environ.get("OLLAMA_MODEL", "codestral"),
+    )
+    if _LLM_BACKEND:
+        print(f"[WEBAPP] Ollama attivo su {_OLLAMA_HOST}")
+    else:
+        print(f"[WEBAPP] Ollama non disponibile su {_OLLAMA_HOST} — solo regole deterministiche")
+
+# Tenta la connessione all'avvio
+_init_llm_backend()
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # PIPELINE DI CONVERSIONE (in memoria)
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -56,6 +83,7 @@ def run_conversion(
     sas_code: str,
     preprocess: bool = False,
     macro_vars: Optional[Dict[str, str]] = None,
+    use_llm: bool = False,
 ) -> dict:
     """
     Esegue la pipeline completa SAS → PySpark in memoria.
@@ -67,6 +95,9 @@ def run_conversion(
     5. DataFrame blocchi (16 colonne)
     6. DataFrame statistiche
     7. DataFrame regole classificazione
+
+    use_llm: se True e Ollama è disponibile, usa il LLM come fallback
+             per i blocchi non convertibili dalle regole deterministiche.
 
     Restituisce un dizionario con tutti i dati per il template HTML.
     """
@@ -90,11 +121,12 @@ def run_conversion(
         # 1. Parser gerarchico
         blocks = parse_sas_blocks_tracked(tmp_path)
 
-        # 2. Codice PySpark completo
-        pyspark_code = convert_tree(blocks)
+        # 2. Codice PySpark completo (con LLM fallback se attivato)
+        llm_backend = _LLM_BACKEND if use_llm else None
+        pyspark_code = convert_tree(blocks, llm_backend=llm_backend)
 
         # 3. Mappa conversione per blocco (per colonna codice_pyspark nell'HTML)
-        pyspark_map = convert_blocks_to_map(blocks)
+        pyspark_map = convert_blocks_to_map(blocks, llm_backend=llm_backend)
 
         # 4. DataFrame blocchi con codice PySpark per blocco
         df = build_dataframe(blocks, pyspark_map=pyspark_map)
@@ -162,12 +194,15 @@ def convert():
         return redirect(url_for("index"))
 
     preprocess   = bool(request.form.get("preprocess"))
+    use_llm      = bool(request.form.get("use_llm"))
     macro_vars_r = request.form.get("macro_vars", "").strip()
     macro_vars   = _parse_macro_vars(macro_vars_r) if macro_vars_r else {}
 
     t0 = time.perf_counter()
     try:
-        result = run_conversion(sas_code, preprocess=preprocess, macro_vars=macro_vars)
+        result = run_conversion(
+            sas_code, preprocess=preprocess, macro_vars=macro_vars, use_llm=use_llm,
+        )
     except Exception as exc:
         return render_template(
             "index.html",
@@ -206,7 +241,11 @@ def convert():
 @app.route("/health", methods=["GET"])
 def health():
     """Health check endpoint per Azure / load balancer."""
-    return {"status": "ok", "version": _VERSION}, 200
+    return {
+        "status": "ok",
+        "version": _VERSION,
+        "ollama": _LLM_BACKEND is not None,
+    }, 200
 
 
 # ═══════════════════════════════════════════════════════════════════════

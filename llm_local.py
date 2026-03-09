@@ -6,7 +6,7 @@ Alternativa LLM 100% on-premise per la conversione SAS → PySpark.
 PROBLEMA RISOLTO:
   Gli script SAS contengono dati sensibili dell'azienda
   (nomi di tabelle di business, logica proprietaria, colonne riservate).
-  Inviarli a un LLM cloud (OpenAI, Claude API, ecc.) è inaccettabile
+  Inviarli a un LLM cloud (OpenAI, ecc.) è inaccettabile
   senza un accordo DPA esplicito dell'azienda.
 
 DUE STRATEGIE PROPOSTE:
@@ -15,7 +15,7 @@ DUE STRATEGIE PROPOSTE:
   │   - Il modello gira sul server/PC dell'azienda                 │
   │   - Nessun dato esce dalla rete                                │
   │   - Modelli consigliati: codellama:13b, deepseek-coder:6.7b    │
-  │   - Qualità ≈ 70-80% di Claude (sufficiente per il fallback)   │
+  │   - Qualità ≈ 70-80% dei migliori LLM cloud (sufficiente)      │
   ├─────────────────────────────────────────────────────────────────┤
   │ Strategia B : ANONIMIZZATORE + LLM Cloud                       │
   │   - Sostituisce nomi tabelle/colonne/valori con placeholder     │
@@ -393,18 +393,18 @@ class SASAnonymizer:
 
 class AnonymizedCloudConverter:
     """
-    Utilizza un LLM cloud (Claude API, Azure OpenAI, ecc.) MA
+    Utilizza un LLM cloud (Azure OpenAI, ecc.) MA
     anonimizza il codice SAS PRIMA dell'invio.
 
     Il LLM cloud non vede mai i nomi di business reali.
 
-    Prerequisito: pip install anthropic  (oppure openai per Azure)
+    Prerequisito: pip install openai
     """
 
     def __init__(
         self,
         api_key: str,
-        model: str = "claude-opus-4-6",
+        model: str = "gpt-4o",
         learning_db_path: str = "learning_db_cloud.jsonl",
     ):
         self.api_key   = api_key
@@ -419,29 +419,31 @@ class AnonymizedCloudConverter:
         3. Rianonimizza il PySpark generato
         """
         try:
-            import anthropic
+            import openai
         except ImportError:
-            print("[AnonymizedCloud] anthropic non installato: pip install anthropic")
+            print("[AnonymizedCloud] openai non installato: pip install openai")
             return None
 
         # Step 1: Anonimizzazione
         anon_code, amap = self.anonymizer.anonymize(sas_code)
 
         # Step 2: Invio al LLM (solo codice anonimizzato)
-        client = anthropic.Anthropic(api_key=self.api_key)
-        msg = client.messages.create(
+        client = openai.OpenAI(api_key=self.api_key)
+        msg = client.chat.completions.create(
             model=self.model,
             max_tokens=2048,
-            system=_SYSTEM_PROMPT_SAS,
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Context: {parent_context}\n"
-                    f"Convert this SAS block:\n```sas\n{anon_code}\n```"
-                )
-            }]
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT_SAS},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Context: {parent_context}\n"
+                        f"Convert this SAS block:\n```sas\n{anon_code}\n```"
+                    ),
+                },
+            ],
         )
-        anon_py = msg.content[0].text.strip()
+        anon_py = msg.choices[0].message.content.strip()
 
         # Step 3: Restituzione dei nomi reali
         real_py = self.anonymizer.deanonymize(anon_py, amap)
@@ -642,7 +644,7 @@ def create_llm_backend(
     codestral_api_key: str = "not-needed",
     codestral_model: str = "codestral-latest",
     cloud_api_key: str = "",
-    cloud_model: str = "claude-opus-4-6",
+    cloud_model: str = "gpt-4o",
     learning_db: str = "learning_db.jsonl",
     config_path: str = "llm_config.json",
 ):
@@ -654,7 +656,7 @@ def create_llm_backend(
     strategy:
       "ollama"     → Ollama locale o su cloud privato (API /api/generate)
       "codestral"  → API OpenAI-compatible (Codestral, Mistral, vLLM, llama.cpp)
-      "anon"       → Anonimizzatore + Claude/OpenAI cloud pubblico
+      "anon"       → Anonimizzatore + LLM cloud pubblico (OpenAI ecc.)
       "auto"       → prova ollama, poi codestral, poi solo regole
       "none"       → nessun LLM (solo regole deterministiche)
 
