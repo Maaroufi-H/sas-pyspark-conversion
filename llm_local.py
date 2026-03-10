@@ -31,13 +31,18 @@ Installazione Ollama:
 """
 from __future__ import annotations
 
+import logging
 import re
 import json
+import time
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+# Logger condiviso con webapp.py (configurato lì; qui è no-op se usato standalone)
+_log = logging.getLogger("ollama")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -90,13 +95,17 @@ class OllamaConverter:
 
     def is_available(self) -> bool:
         """Verifica che Ollama sia in esecuzione e che il modello sia disponibile."""
+        url = f"{self.host}/api/tags"
+        _log.debug(f"[Ollama] Check disponibilità → GET {url}")
         try:
-            url = f"{self.host}/api/tags"
             with urllib.request.urlopen(url, timeout=3) as resp:
                 data = json.loads(resp.read())
             models = [m["name"] for m in data.get("models", [])]
-            return any(self.model.split(":")[0] in m for m in models)
-        except Exception:
+            found = any(self.model.split(":")[0] in m for m in models)
+            _log.info(f"[Ollama] Modelli presenti: {models} | '{self.model}' trovato: {found}")
+            return found
+        except Exception as e:
+            _log.warning(f"[Ollama] Non raggiungibile ({url}): {e}")
             return False
 
     # ── Conversione ─────────────────────────────────────────────────
@@ -112,9 +121,15 @@ class OllamaConverter:
         Restituisce None se Ollama non è disponibile.
         """
         if not self.is_available():
+            _log.info("[Ollama] convert() annullato: Ollama non disponibile")
             return None
 
         prompt = self._build_prompt(sas_code, parent_context, block_category)
+
+        _log.info(
+            f"[Ollama] Invio richiesta | model={self.model} | "
+            f"categoria={block_category!r} | SAS={len(sas_code)} chars"
+        )
 
         payload = json.dumps({
             "model": self.model,
@@ -133,12 +148,20 @@ class OllamaConverter:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        t0 = time.perf_counter()
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 result = json.loads(resp.read())
-                return result.get("response", "").strip()
+                response = result.get("response", "").strip()
+            elapsed = time.perf_counter() - t0
+            _log.info(
+                f"[Ollama] Risposta ricevuta | {elapsed:.1f}s | "
+                f"{len(response)} chars output"
+            )
+            return response
         except urllib.error.URLError as e:
-            print(f"[OllamaConverter] Errore di rete: {e}")
+            elapsed = time.perf_counter() - t0
+            _log.error(f"[Ollama] Errore di rete dopo {elapsed:.1f}s: {e}")
             return None
 
     def _build_prompt(

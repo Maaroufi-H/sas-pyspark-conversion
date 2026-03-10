@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Variabili Macro — Documentazione</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 2rem;
+    }
+    .container { max-width: 860px; margin: 0 auto; }
+    header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%);
+      border: 1px solid #2d4a6b; border-radius: 10px;
+      padding: 1.5rem 2rem; margin-bottom: 2rem;
+    }
+    header h1 { font-size: 1.6rem; color: #f8fafc; }
+    header p  { color: #94a3b8; margin-top: 0.4rem; font-size: 0.9rem; }
+    .back { color: #38bdf8; text-decoration: none; font-size: 0.85rem; }
+    .back:hover { text-decoration: underline; }
+    h2 { font-size: 1.15rem; color: #38bdf8; margin: 1.8rem 0 0.7rem; border-bottom: 1px solid #1e293b; padding-bottom: 0.35rem; }
+    p { color: #cbd5e1; line-height: 1.7; margin-bottom: 0.75rem; }
+    ul, ol { color: #cbd5e1; margin: 0.5rem 0 0.75rem 1.4rem; line-height: 1.8; }
+    code {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 4px; padding: 1px 5px; font-size: 0.85em; color: #86efac;
+    }
+    pre {
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      padding: 1rem 1.2rem; overflow-x: auto; margin: 0.75rem 0 1rem;
+      font-size: 0.85rem; color: #86efac; line-height: 1.6;
+    }
+    table { width: 100%; border-collapse: collapse; margin: 0.75rem 0 1rem; font-size: 0.88rem; }
+    th { background: #1e3a5f; color: #94a3b8; text-align: left; padding: 0.5rem 0.75rem; }
+    td { padding: 0.45rem 0.75rem; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+    tr:last-child td { border-bottom: none; }
+    .warn { background: #451a03; border: 1px solid #92400e; border-radius: 6px; padding: 0.75rem 1rem; margin: 0.75rem 0; color: #fcd34d; font-size: 0.88rem; }
+    .step { display: flex; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.6rem; }
+    .step-num { min-width: 24px; height: 24px; background: #0284c7; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+    .step-text { color: #cbd5e1; line-height: 1.6; }
+    .badge { display: inline-block; background: #0284c7; color: #fff; border-radius: 4px; padding: 1px 7px; font-size: 0.75rem; font-weight: 600; vertical-align: middle; margin-left: 6px; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <a class="back" href="/">← Torna all'app</a>
+  <h1>Variabili Macro <span class="badge">opzionale</span></h1>
+  <p>Fornisci i valori delle variabili macro SAS (<code>&amp;var</code>) per migliorare la qualità della conversione.</p>
+</header>
+
+<h2>Cosa sono</h2>
+<p>Le variabili macro SAS (<code>&amp;nome</code>) sono placeholder risolti dal macro-processore
+SAS prima dell'esecuzione. Per convertire correttamente il codice, il convertitore
+ha bisogno di conoscere i loro valori.</p>
+
+<h2>Come usarle nella webapp</h2>
+<div class="step">
+  <div class="step-num">1</div>
+  <div class="step-text">Clicca <strong>"+ Aggiungi variabile"</strong></div>
+</div>
+<div class="step">
+  <div class="step-num">2</div>
+  <div class="step-text">Inserisci il <strong>nome</strong> della variabile (senza <code>&amp;</code>, es. <code>nid</code>)</div>
+</div>
+<div class="step">
+  <div class="step-num">3</div>
+  <div class="step-text">Inserisci il <strong>valore</strong> corrispondente (es. <code>3</code>)</div>
+</div>
+<div class="step">
+  <div class="step-num">4</div>
+  <div class="step-text">Clicca <strong>"✕ Elimina"</strong> per rimuovere una riga</div>
+</div>
+<p>Le righe vengono serializzate al submit nel formato <code>nome=valore nome2=valore2 ...</code> e passate al backend.</p>
+
+<h2>Come il backend le usa</h2>
+<p>La funzione <code>_parse_macro_vars()</code> converte la stringa in un dizionario Python:</p>
+<pre>{"nid": "3", "livAgregg": "1", "path_excel": "/data"}</pre>
+<p>Questo dizionario viene passato a:</p>
+<ul>
+  <li><code>SASMacroPreprocessor(known_vars=...)</code> → risolve <code>&amp;nid</code> → <code>3</code> nel testo SAS</li>
+  <li><code>ConversionContext</code> → disponibile durante la generazione PySpark</li>
+</ul>
+
+<h2>Quando servono</h2>
+<table>
+  <tr><th>Pattern SAS</th><th>Esempio</th><th>Quando serve</th></tr>
+  <tr><td><code>&amp;var</code> diretto</td><td><code>where id = "&amp;prodotto"</code></td><td>Sempre</td></tr>
+  <tr><td><code>&amp;&amp;var&amp;i</code></td><td><code>&amp;&amp;id_prodotto&amp;i</code></td><td>Quando <code>i</code> dipende da <code>&amp;nid</code></td></tr>
+  <tr><td><code>%do i=1 %to &amp;nid</code></td><td>Ciclo con limite variabile</td><td>Per srotolare il ciclo</td></tr>
+</table>
+
+<h2>Limitazioni e problemi pending</h2>
+<div class="warn">⚠ Casi non gestiti:</div>
+<ul>
+  <li><strong>Variabili calcolate da query</strong>: se il valore dipende da <code>&amp;sqlobs</code>, non può essere fornito staticamente.</li>
+  <li><strong>Variabili di sistema</strong>: <code>&amp;sysdate</code>, <code>&amp;systime</code>, <code>&amp;syserr</code> non vengono risolte automaticamente.</li>
+  <li><strong>Maiuscole/minuscole</strong>: i nomi vengono normalizzati in minuscolo internamente.</li>
+</ul>
+
+<h2>File sorgente</h2>
+<p><code>webapp.py</code> — <code>_parse_macro_vars()</code> | <code>sas_macro_preprocessor.py</code> — <code>SASMacroPreprocessor</code></p>
+
+</div>
+</body>
+</html>

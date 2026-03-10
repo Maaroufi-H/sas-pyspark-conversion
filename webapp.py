@@ -17,14 +17,16 @@ Route:
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tempfile
 import time
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Dict, Optional
 
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory
 
 # ── Import pipeline di conversione ──────────────────────────────────
 from trova_sas3_tracker import (
@@ -50,6 +52,32 @@ _REPO    = "https://github.com/Maaroufi-H/sas-pyspark-conversion"
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# LOGGING COMUNICAZIONE OLLAMA
+# ═══════════════════════════════════════════════════════════════════════
+# I log vengono scritti in logs/ollama_comms.log (rotazione a 2 MB, 3 backup)
+# e anche su stdout per visibilità in Docker.
+
+_LOG_DIR = Path("logs")
+_LOG_DIR.mkdir(exist_ok=True)
+
+ollama_logger = logging.getLogger("ollama")
+ollama_logger.setLevel(logging.DEBUG)
+ollama_logger.propagate = False  # evita duplicati nel root logger
+
+_log_fmt = logging.Formatter("%(asctime)s [%(levelname)-5s] %(message)s",
+                              datefmt="%Y-%m-%d %H:%M:%S")
+
+_fh = RotatingFileHandler(_LOG_DIR / "ollama_comms.log",
+                           maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+_fh.setFormatter(_log_fmt)
+_ch = logging.StreamHandler()
+_ch.setFormatter(_log_fmt)
+
+ollama_logger.addHandler(_fh)
+ollama_logger.addHandler(_ch)
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # BACKEND LLM (Ollama locale, opzionale)
 # ═══════════════════════════════════════════════════════════════════════
 # Se la variabile d'ambiente OLLAMA_HOST è definita (es. dal docker-compose),
@@ -61,15 +89,17 @@ _LLM_BACKEND = None
 def _init_llm_backend():
     """Inizializza il backend LLM (Ollama) se disponibile."""
     global _LLM_BACKEND
+    model = os.environ.get("OLLAMA_MODEL", "codestral")
+    ollama_logger.info(f"[WEBAPP] Inizializzazione Ollama | host={_OLLAMA_HOST} | model={model}")
     _LLM_BACKEND = create_llm_backend(
         strategy="ollama",
         ollama_host=_OLLAMA_HOST,
-        ollama_model=os.environ.get("OLLAMA_MODEL", "codestral"),
+        ollama_model=model,
     )
     if _LLM_BACKEND:
-        print(f"[WEBAPP] Ollama attivo su {_OLLAMA_HOST}")
+        ollama_logger.info(f"[WEBAPP] Ollama ATTIVO su {_OLLAMA_HOST}")
     else:
-        print(f"[WEBAPP] Ollama non disponibile su {_OLLAMA_HOST} — solo regole deterministiche")
+        ollama_logger.warning(f"[WEBAPP] Ollama NON disponibile su {_OLLAMA_HOST} — solo regole deterministiche")
 
 # Tenta la connessione all'avvio
 _init_llm_backend()
@@ -236,6 +266,12 @@ def convert():
         preprocess=preprocess,
         macro_vars_raw=macro_vars_r,
     )
+
+
+@app.route("/docs/<path:filename>")
+def serve_docs(filename):
+    """Serve i file HTML della documentazione da docs/."""
+    return send_from_directory("docs", filename)
 
 
 @app.route("/health", methods=["GET"])

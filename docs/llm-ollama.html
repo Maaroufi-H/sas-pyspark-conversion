@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Usa LLM Ollama — Documentazione</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 2rem;
+    }
+    .container { max-width: 860px; margin: 0 auto; }
+    header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%);
+      border: 1px solid #2d4a6b; border-radius: 10px;
+      padding: 1.5rem 2rem; margin-bottom: 2rem;
+    }
+    header h1 { font-size: 1.6rem; color: #f8fafc; }
+    header p  { color: #94a3b8; margin-top: 0.4rem; font-size: 0.9rem; }
+    .back { color: #38bdf8; text-decoration: none; font-size: 0.85rem; }
+    .back:hover { text-decoration: underline; }
+    h2 { font-size: 1.15rem; color: #38bdf8; margin: 1.8rem 0 0.7rem; border-bottom: 1px solid #1e293b; padding-bottom: 0.35rem; }
+    p { color: #cbd5e1; line-height: 1.7; margin-bottom: 0.75rem; }
+    ul, ol { color: #cbd5e1; margin: 0.5rem 0 0.75rem 1.4rem; line-height: 1.8; }
+    code {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 4px; padding: 1px 5px; font-size: 0.85em; color: #86efac;
+    }
+    pre {
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      padding: 1rem 1.2rem; overflow-x: auto; margin: 0.75rem 0 1rem;
+      font-size: 0.85rem; color: #86efac; line-height: 1.6;
+    }
+    table { width: 100%; border-collapse: collapse; margin: 0.75rem 0 1rem; font-size: 0.88rem; }
+    th { background: #1e3a5f; color: #94a3b8; text-align: left; padding: 0.5rem 0.75rem; }
+    td { padding: 0.45rem 0.75rem; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+    tr:last-child td { border-bottom: none; }
+    .warn { background: #451a03; border: 1px solid #92400e; border-radius: 6px; padding: 0.75rem 1rem; margin: 0.75rem 0; color: #fcd34d; font-size: 0.88rem; }
+    .info { background: #0c2340; border: 1px solid #1e4976; border-radius: 6px; padding: 0.75rem 1rem; margin: 0.75rem 0; color: #7dd3fc; font-size: 0.88rem; }
+    .badge { display: inline-block; background: #0284c7; color: #fff; border-radius: 4px; padding: 1px 7px; font-size: 0.75rem; font-weight: 600; vertical-align: middle; margin-left: 6px; }
+    .flow { background: #1e293b; border-left: 3px solid #0284c7; padding: 0.75rem 1rem; border-radius: 0 6px 6px 0; margin: 0.75rem 0; }
+    .flow ol { margin-left: 1.2rem; }
+    .flow li { color: #94a3b8; line-height: 1.9; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <a class="back" href="/">← Torna all'app</a>
+  <h1>Usa LLM Ollama <span class="badge">fallback</span></h1>
+  <p>LLM locale on-premise per blocchi SAS non convertibili dalle regole deterministiche.</p>
+</header>
+
+<div class="info">🔒 Tutti i dati rimangono sulla rete interna — Ollama gira localmente sul server/VM.</div>
+
+<h2>Cosa fa</h2>
+<p>Quando il motore deterministico (Livello 1) classifica un blocco come
+<strong>non convertibile</strong>, l'LLM Ollama viene chiamato come fallback
+per tentare una conversione generativa. Il codice risultante è marcato
+<code>[LLM-generated]</code> per indicare che richiede revisione manuale.</p>
+
+<h2>Logica di attivazione</h2>
+<div class="flow">
+  <ol>
+    <li>Il motore deterministico analizza il blocco con le regole JSON</li>
+    <li>Se <code>convertibile=SI</code> → genera PySpark standard</li>
+    <li>Se <code>convertibile=NO</code> e LLM attivo → chiama <code>OllamaConverter.convert()</code></li>
+    <li>Se Ollama risponde → usa il codice generato (marcato <code>[LLM-generated]</code>)</li>
+    <li>Se Ollama non risponde → genera un blocco <code># TODO</code></li>
+  </ol>
+</div>
+
+<h2>Come funziona internamente</h2>
+<ul>
+  <li>Chiama <code>GET /api/tags</code> per verificare che Ollama sia attivo (timeout: 3s)</li>
+  <li>Costruisce un prompt con fino a 5 esempi di correzioni manuali precedenti (few-shot)</li>
+  <li>Chiama <code>POST /api/generate</code> con <code>stream: false</code> (timeout: 120s)</li>
+  <li>Restituisce il codice Python generato</li>
+</ul>
+
+<h2>Configurazione (<code>llm_config.json</code>)</h2>
+<pre>{
+  "strategy": "auto",
+  "ollama": {
+    "host": "http://localhost:11434",
+    "model": "codestral"
+  }
+}</pre>
+<table>
+  <tr><th>Parametro</th><th>Descrizione</th></tr>
+  <tr><td><code>ollama.host</code></td><td>URL server Ollama (default: <code>http://localhost:11434</code>)</td></tr>
+  <tr><td><code>ollama.model</code></td><td>Modello da usare (es. <code>codestral</code>, <code>deepseek-coder:6.7b</code>)</td></tr>
+</table>
+<p>Variabili d'ambiente equivalenti: <code>OLLAMA_HOST</code>, <code>OLLAMA_MODEL</code>.</p>
+
+<h2>Modelli consigliati</h2>
+<table>
+  <tr><th>Modello</th><th>RAM</th><th>Qualità</th></tr>
+  <tr><td><code>deepseek-coder:6.7b</code></td><td>~5 GB</td><td>Buona — ottimo sul codice</td></tr>
+  <tr><td><code>codestral</code></td><td>~12 GB</td><td>Ottima — specializzato nel codice</td></tr>
+  <tr><td><code>codellama:13b</code></td><td>~10 GB</td><td>Buona</td></tr>
+  <tr><td><code>mistral:7b</code></td><td>~5 GB</td><td>Discreta — uso generale</td></tr>
+</table>
+
+<h2>Log comunicazioni (<code>logs/ollama_comms.log</code>)</h2>
+<pre>2026-03-10 14:22:01 [INFO ] [Ollama] Check disponibilità → GET http://localhost:11434/api/tags
+2026-03-10 14:22:01 [INFO ] [Ollama] Modelli presenti: ['codestral:latest'] | 'codestral' trovato: True
+2026-03-10 14:22:01 [INFO ] [Ollama] Invio richiesta | model=codestral | categoria='data' | SAS=312 chars
+2026-03-10 14:22:09 [INFO ] [Ollama] Risposta ricevuta | 8.2s | 487 chars output</pre>
+
+<h2>Limitazioni e problemi pending</h2>
+<div class="warn">⚠ Punti di attenzione:</div>
+<ul>
+  <li><strong>Qualità variabile</strong>: codice corretto in circa 60-80% dei casi. Revisione manuale sempre consigliata.</li>
+  <li><strong>Tempo di risposta</strong>: 5-60 secondi per blocco a seconda del modello.</li>
+  <li><strong>RAM</strong>: modelli 7B+ richiedono GPU o molta RAM.</li>
+  <li><strong>Nessuna validazione sintattica</strong>: il codice Python generato non viene verificato prima di essere inserito nell'output.</li>
+  <li><strong>Feedback/apprendimento</strong>: le correzioni manuali si salvano in <code>learning_db.jsonl</code> via <code>OllamaConverter.record_correction()</code>.</li>
+</ul>
+
+<h2>File sorgente</h2>
+<p><code>llm_local.py</code> — classe <code>OllamaConverter</code></p>
+
+</div>
+</body>
+</html>

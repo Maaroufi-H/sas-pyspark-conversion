@@ -665,9 +665,13 @@
 
 <script>
 /* ── COPIA CODICE ── */
+// _plainCode viene valorizzato da highlightPySpark() PRIMA di modificare innerHTML,
+// così la copia restituisce sempre Python puro senza tag HTML.
+let _plainCode = '';
+
 function copyCode(btn) {
-  const code = document.getElementById('pyspark-output').textContent;
-  navigator.clipboard.writeText(code).then(() => {
+  const text = _plainCode || document.getElementById('pyspark-output').textContent;
+  navigator.clipboard.writeText(text).then(() => {
     btn.textContent = '✓ Copiato!';
     btn.classList.add('copied');
     setTimeout(() => {
@@ -718,7 +722,10 @@ function filterTable() {
   const pre = document.getElementById('pyspark-output');
   if (!pre) return;
 
-  let html = pre.textContent
+  // Salva il testo puro PRIMA di qualsiasi modifica HTML → usato dal copy
+  _plainCode = pre.textContent;
+
+  let html = _plainCode
     /* TODO lines → giallo */
     .replace(/(^.*# TODO.*$)/gm, '<span class="todo">$1</span>')
     /* commenti # → grigio (non TODO) */

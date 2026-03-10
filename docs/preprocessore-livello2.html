@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pre-processore Macro Livello 2 — Documentazione</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 2rem;
+    }
+    .container { max-width: 860px; margin: 0 auto; }
+    header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%);
+      border: 1px solid #2d4a6b; border-radius: 10px;
+      padding: 1.5rem 2rem; margin-bottom: 2rem;
+    }
+    header h1 { font-size: 1.6rem; color: #f8fafc; }
+    header p  { color: #94a3b8; margin-top: 0.4rem; font-size: 0.9rem; }
+    .back { color: #38bdf8; text-decoration: none; font-size: 0.85rem; }
+    .back:hover { text-decoration: underline; }
+    h2 { font-size: 1.15rem; color: #38bdf8; margin: 1.8rem 0 0.7rem; border-bottom: 1px solid #1e293b; padding-bottom: 0.35rem; }
+    p { color: #cbd5e1; line-height: 1.7; margin-bottom: 0.75rem; }
+    ul, ol { color: #cbd5e1; margin: 0.5rem 0 0.75rem 1.4rem; line-height: 1.8; }
+    code {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 4px; padding: 1px 5px; font-size: 0.85em; color: #86efac;
+    }
+    pre {
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      padding: 1rem 1.2rem; overflow-x: auto; margin: 0.75rem 0 1rem;
+      font-size: 0.85rem; color: #86efac; line-height: 1.6;
+    }
+    table { width: 100%; border-collapse: collapse; margin: 0.75rem 0 1rem; font-size: 0.88rem; }
+    th { background: #1e3a5f; color: #94a3b8; text-align: left; padding: 0.5rem 0.75rem; }
+    td { padding: 0.45rem 0.75rem; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+    tr:last-child td { border-bottom: none; }
+    .warn { background: #451a03; border: 1px solid #92400e; border-radius: 6px; padding: 0.75rem 1rem; margin: 0.75rem 0; color: #fcd34d; font-size: 0.88rem; }
+    .badge { display: inline-block; background: #0284c7; color: #fff; border-radius: 4px; padding: 1px 7px; font-size: 0.75rem; font-weight: 600; vertical-align: middle; margin-left: 6px; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <a class="back" href="/">← Torna all'app</a>
+  <h1>Pre-processore Macro Livello 2 <span class="badge">opzionale</span></h1>
+  <p>Risolve le macro variabili SAS e srotola i cicli <code>%do</code> prima della conversione.</p>
+</header>
+
+<h2>Cosa fa</h2>
+<p>Il pre-processore Livello 2 trasforma il codice SAS in un file "piatto" senza macro
+variabili irrisolte, così il motore deterministico (Livello 1) ottiene un input pulito
+e produce conversioni con affidabilità più alta.</p>
+<ul>
+  <li>Raccoglie <code>%let var = valore;</code></li>
+  <li>Risolve <code>&amp;var</code> (singolo ampersand)</li>
+  <li>Risolve <code>&amp;&amp;var&amp;i</code> (doppio ampersand — due passate, come SAS reale)</li>
+  <li>Srotola <code>%do i=1 %to N; ... %end;</code> quando <code>N</code> è noto</li>
+  <li>Valuta <code>%sysfunc(int(...))</code> per determinare limiti numerici</li>
+</ul>
+
+<h2>Algoritmo — 5 passate</h2>
+<table>
+  <tr><th>Passata</th><th>Funzione</th><th>Esempio</th></tr>
+  <tr><td>1</td><td><code>_collect_let_statements()</code></td><td><code>%let nid=3;</code> → <code>{"nid":"3"}</code></td></tr>
+  <tr><td>2</td><td><code>_resolve_sysfunc_int()</code></td><td><code>%sysfunc(int(&amp;var))</code> → valore numerico</td></tr>
+  <tr><td>3</td><td><code>_resolve_double_ampersand()</code></td><td><code>&amp;&amp;id_prodotto&amp;i</code> → <code>id_prodotto2</code></td></tr>
+  <tr><td>4</td><td><code>_unroll_do_loops()</code></td><td><code>%do i=1 %to 3; ... %end;</code> → 3 copie</td></tr>
+  <tr><td>5</td><td><code>_resolve_single_ampersand()</code></td><td><code>&amp;var</code> → valore o lasciato invariato</td></tr>
+</table>
+
+<h2>Come si attiva</h2>
+<p>Nella webapp: spunta <strong>"Pre-processore macro Livello 2"</strong> prima di cliccare Converti.</p>
+<p>Da riga di comando:</p>
+<pre>python sas_macro_preprocessor.py INPUT/code.sas \
+       --output INPUT/code.resolved.sas \
+       --macro-vars nid=3 livAgregg=1</pre>
+
+<h2>Parametri</h2>
+<table>
+  <tr><th>Parametro</th><th>Default</th><th>Descrizione</th></tr>
+  <tr><td><code>known_vars</code></td><td><code>{}</code></td><td>Variabili macro pre-note (es. <code>{"nid": "3"}</code>)</td></tr>
+  <tr><td><code>max_loop_iterations</code></td><td>50</td><td>Limite massimo di iterazioni per <code>%do</code> loop</td></tr>
+</table>
+
+<h2>Limitazioni e problemi pending</h2>
+<div class="warn">⚠ Le seguenti situazioni NON sono ancora gestite:</div>
+<ul>
+  <li><strong><code>%macro</code> con argomenti</strong>: le chiamate a macro parametrizzate (es. <code>%importa_dati(flusso=A)</code>) non vengono espanse.</li>
+  <li><strong><code>%if</code>/<code>%else</code> condizionali</strong>: solo il ramo attivo è mantenuto se la condizione è risolvibile; altrimenti entrambi i rami restano nel codice.</li>
+  <li><strong>Cicli con limiti non numerici</strong>: se <code>N</code> dipende da <code>&amp;sqlobs</code> o da una query, il ciclo non viene srotolato.</li>
+  <li><strong><code>%include</code></strong>: i file inclusi non vengono letti automaticamente.</li>
+  <li><strong>Triplo ampersand</strong> (<code>&amp;&amp;&amp;var</code>): non gestito.</li>
+</ul>
+
+<h2>File sorgente</h2>
+<p><code>sas_macro_preprocessor.py</code> — classe <code>SASMacroPreprocessor</code> (≈500 righe)</p>
+
+</div>
+</body>
+</html>
