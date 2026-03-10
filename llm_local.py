@@ -393,18 +393,18 @@ class SASAnonymizer:
 
 class AnonymizedCloudConverter:
     """
-    Utilizza un LLM cloud (Azure OpenAI, ecc.) MA
+    Utilizza un LLM cloud (API Anthropic, ecc.) MA
     anonimizza il codice SAS PRIMA dell'invio.
 
     Il LLM cloud non vede mai i nomi di business reali.
 
-    Prerequisito: pip install openai
+    Prerequisito: pip install anthropic
     """
 
     def __init__(
         self,
         api_key: str,
-        model: str = "gpt-4o",
+        model: str = "claude-opus-4-6",
         learning_db_path: str = "learning_db_cloud.jsonl",
     ):
         self.api_key   = api_key
@@ -419,21 +419,21 @@ class AnonymizedCloudConverter:
         3. Rianonimizza il PySpark generato
         """
         try:
-            import openai
+            import anthropic
         except ImportError:
-            print("[AnonymizedCloud] openai non installato: pip install openai")
+            print("[AnonymizedCloud] anthropic non installato: pip install anthropic")
             return None
 
         # Step 1: Anonimizzazione
         anon_code, amap = self.anonymizer.anonymize(sas_code)
 
         # Step 2: Invio al LLM (solo codice anonimizzato)
-        client = openai.OpenAI(api_key=self.api_key)
-        msg = client.chat.completions.create(
+        client = anthropic.Anthropic(api_key=self.api_key)
+        msg = client.messages.create(
             model=self.model,
             max_tokens=2048,
+            system=_SYSTEM_PROMPT_SAS,
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT_SAS},
                 {
                     "role": "user",
                     "content": (
@@ -443,7 +443,7 @@ class AnonymizedCloudConverter:
                 },
             ],
         )
-        anon_py = msg.choices[0].message.content.strip()
+        anon_py = msg.content[0].text.strip()
 
         # Step 3: Restituzione dei nomi reali
         real_py = self.anonymizer.deanonymize(anon_py, amap)
@@ -644,7 +644,7 @@ def create_llm_backend(
     codestral_api_key: str = "not-needed",
     codestral_model: str = "codestral-latest",
     cloud_api_key: str = "",
-    cloud_model: str = "gpt-4o",
+    cloud_model: str = "claude-opus-4-6",
     learning_db: str = "learning_db.jsonl",
     config_path: str = "llm_config.json",
 ):

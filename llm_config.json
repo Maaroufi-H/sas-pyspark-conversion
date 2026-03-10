@@ -1,10 +1,10 @@
 {
-  "_comment": "Configurazione LLM pour la conversion SAS -> PySpark. Renommer ce fichier en llm_config.json et adapter les valeurs.",
+  "_comment": "Configurazione LLM per la conversione SAS -> PySpark. Rinominare questo file in llm_config.json e adattare i valori.",
 
   "strategy": "auto",
 
   "ollama": {
-    "_comment": "Ollama local ou sur cloud prive. Modeles recommandes: codestral, deepseek-coder:6.7b, codellama:13b",
+    "_comment": "Ollama locale o su cloud privato. Modelli consigliati: codestral, deepseek-coder:6.7b, codellama:13b",
     "host":  "http://localhost:11434",
     "model": "codestral"
   },
