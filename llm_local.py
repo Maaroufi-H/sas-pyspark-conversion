@@ -96,16 +96,16 @@ class OllamaConverter:
     def is_available(self) -> bool:
         """Verifica che Ollama sia in esecuzione e che il modello sia disponibile."""
         url = f"{self.host}/api/tags"
-        _log.debug(f"[Ollama] Check disponibilità → GET {url}")
+        _log.debug(f"[OLLAMA] Check disponibilità → GET {url}")
         try:
             with urllib.request.urlopen(url, timeout=3) as resp:
                 data = json.loads(resp.read())
             models = [m["name"] for m in data.get("models", [])]
             found = any(self.model.split(":")[0] in m for m in models)
-            _log.info(f"[Ollama] Modelli presenti: {models} | '{self.model}' trovato: {found}")
+            _log.info(f"[OLLAMA] Modelli presenti: {models} | '{self.model}' trovato: {found}")
             return found
         except Exception as e:
-            _log.warning(f"[Ollama] Non raggiungibile ({url}): {e}")
+            _log.warning(f"[OLLAMA] Non raggiungibile ({url}): {e}")
             return False
 
     # ── Conversione ─────────────────────────────────────────────────
@@ -121,13 +121,13 @@ class OllamaConverter:
         Restituisce None se Ollama non è disponibile.
         """
         if not self.is_available():
-            _log.info("[Ollama] convert() annullato: Ollama non disponibile")
+            _log.info("[OLLAMA] convert() annullato: Ollama non disponibile")
             return None
 
         prompt = self._build_prompt(sas_code, parent_context, block_category)
 
         _log.info(
-            f"[Ollama] Invio richiesta | model={self.model} | "
+            f"[OLLAMA] Invio richiesta | model={self.model} | "
             f"categoria={block_category!r} | SAS={len(sas_code)} chars"
         )
 
@@ -155,13 +155,13 @@ class OllamaConverter:
                 response = result.get("response", "").strip()
             elapsed = time.perf_counter() - t0
             _log.info(
-                f"[Ollama] Risposta ricevuta | {elapsed:.1f}s | "
+                f"[OLLAMA] Risposta ricevuta | {elapsed:.1f}s | "
                 f"{len(response)} chars output"
             )
             return response
         except urllib.error.URLError as e:
             elapsed = time.perf_counter() - t0
-            _log.error(f"[Ollama] Errore di rete dopo {elapsed:.1f}s: {e}")
+            _log.error(f"[OLLAMA] Errore di rete dopo {elapsed:.1f}s: {e}")
             return None
 
     def _build_prompt(
@@ -659,17 +659,20 @@ def load_config(config_path: str = "llm_config.json") -> dict:
         return json.load(f)
 
 
+_UNSET = object()  # sentinella: distingue "param non passato" da valore esplicito
+
+
 def create_llm_backend(
     strategy: str = "auto",
-    ollama_model: str = "codestral",
-    ollama_host: str = "http://localhost:11434",
-    codestral_host: str = "http://localhost:8080/v1",
-    codestral_api_key: str = "not-needed",
-    codestral_model: str = "codestral-latest",
+    ollama_model: object = _UNSET,
+    ollama_host:  object = _UNSET,
+    codestral_host:    object = _UNSET,
+    codestral_api_key: object = _UNSET,
+    codestral_model:   object = _UNSET,
     cloud_api_key: str = "",
-    cloud_model: str = "claude-opus-4-6",
-    learning_db: str = "learning_db.jsonl",
-    config_path: str = "llm_config.json",
+    cloud_model:   str = "claude-opus-4-6",
+    learning_db:   str = "learning_db.jsonl",
+    config_path:   str = "llm_config.json",
 ):
     """
     Crea il backend LLM secondo la strategia scelta.
@@ -697,17 +700,19 @@ def create_llm_backend(
             codestral_model="codestral-latest",
         )
     """
-    # Legge configurazione da file (i parametri espliciti hanno precedenza)
+    # Legge configurazione da file.
+    # PRIORITÀ: parametro esplicito > config file > default hardcoded
     cfg = load_config(config_path)
 
     if not strategy or strategy == "auto":
         strategy = cfg.get("strategy", "auto")
 
-    ollama_host      = cfg.get("ollama", {}).get("host",  ollama_host)
-    ollama_model     = cfg.get("ollama", {}).get("model", ollama_model)
-    codestral_host   = cfg.get("codestral", {}).get("host",    codestral_host)
-    codestral_model  = cfg.get("codestral", {}).get("model",   codestral_model)
-    codestral_api_key= cfg.get("codestral", {}).get("api_key", codestral_api_key)
+    # Config file è usato SOLO come fallback quando il param non è stato passato
+    if ollama_host        is _UNSET: ollama_host        = cfg.get("ollama",     {}).get("host",    "http://localhost:11434")
+    if ollama_model       is _UNSET: ollama_model       = cfg.get("ollama",     {}).get("model",   "codestral")
+    if codestral_host     is _UNSET: codestral_host     = cfg.get("codestral",  {}).get("host",    "http://localhost:8080/v1")
+    if codestral_model    is _UNSET: codestral_model    = cfg.get("codestral",  {}).get("model",   "codestral-latest")
+    if codestral_api_key  is _UNSET: codestral_api_key  = cfg.get("codestral",  {}).get("api_key", "not-needed")
 
     if strategy == "none":
         print("[LLM] LLM disabilitato: solo regole deterministiche.")

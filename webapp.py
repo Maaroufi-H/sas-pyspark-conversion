@@ -14,6 +14,11 @@ Route:
     GET  /          → form per incollare il codice SAS
     POST /convert   → esegue la conversione, mostra risultati in HTML
     GET  /health    → health check per Azure / load balancer
+    GET  /docs/<f>  → documentazione HTML
+
+Log:
+    logs/converter.log  (rotazione 2 MB × 3 backup)
+    Seguire in tempo reale:  tail -f logs/converter.log
 """
 from __future__ import annotations
 
@@ -52,56 +57,84 @@ _REPO    = "https://github.com/Maaroufi-H/sas-pyspark-conversion"
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# LOGGING COMUNICAZIONE OLLAMA
+# LOGGING UNIFICATO  →  logs/converter.log
 # ═══════════════════════════════════════════════════════════════════════
-# I log vengono scritti in logs/ollama_comms.log (rotazione a 2 MB, 3 backup)
-# e anche su stdout per visibilità in Docker.
+# Un unico file raccoglie:
+#   [APP]    — eventi applicativi (richieste, config, risultati)
+#   [OLLAMA] — comunicazioni con Ollama (check, invio, risposta, errori)
+#
+# Per seguire in tempo reale:
+#   tail -f logs/converter.log
+# ──────────────────────────────────────────────────────────────────────
 
 _LOG_DIR = Path("logs")
 _LOG_DIR.mkdir(exist_ok=True)
 
-ollama_logger = logging.getLogger("ollama")
-ollama_logger.setLevel(logging.DEBUG)
-ollama_logger.propagate = False  # evita duplicati nel root logger
+_log_fmt = logging.Formatter(
+    "%(asctime)s [%(levelname)-7s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
-_log_fmt = logging.Formatter("%(asctime)s [%(levelname)-5s] %(message)s",
-                              datefmt="%Y-%m-%d %H:%M:%S")
-
-_fh = RotatingFileHandler(_LOG_DIR / "ollama_comms.log",
-                           maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+# Handler su file (rotazione) — unico file per tutti i logger
+_fh = RotatingFileHandler(
+    _LOG_DIR / "converter.log",
+    maxBytes=2_000_000,
+    backupCount=3,
+    encoding="utf-8",
+)
 _fh.setFormatter(_log_fmt)
+
+# Handler su stdout (visibile in Docker logs)
 _ch = logging.StreamHandler()
 _ch.setFormatter(_log_fmt)
 
-ollama_logger.addHandler(_fh)
-ollama_logger.addHandler(_ch)
+
+def _make_logger(name: str) -> logging.Logger:
+    lg = logging.getLogger(name)
+    lg.setLevel(logging.DEBUG)
+    lg.propagate = False
+    lg.addHandler(_fh)
+    lg.addHandler(_ch)
+    return lg
+
+
+# Logger applicativo (richieste, conversioni, errori)
+log = _make_logger("converter.app")
+
+# Logger Ollama (importato anche da llm_local.py tramite getLogger("ollama"))
+ollama_logger = _make_logger("ollama")
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # BACKEND LLM (Ollama locale, opzionale)
 # ═══════════════════════════════════════════════════════════════════════
-# Se la variabile d'ambiente OLLAMA_HOST è definita (es. dal docker-compose),
-# tenta la connessione a Ollama all'avvio. Se Ollama non è disponibile,
-# l'app funziona comunque con le sole regole deterministiche.
 _OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 _LLM_BACKEND = None
+
 
 def _init_llm_backend():
     """Inizializza il backend LLM (Ollama) se disponibile."""
     global _LLM_BACKEND
     model = os.environ.get("OLLAMA_MODEL", "codestral")
-    ollama_logger.info(f"[WEBAPP] Inizializzazione Ollama | host={_OLLAMA_HOST} | model={model}")
+    ollama_logger.info(
+        f"[OLLAMA] Inizializzazione | host={_OLLAMA_HOST} | model={model}"
+    )
     _LLM_BACKEND = create_llm_backend(
         strategy="ollama",
         ollama_host=_OLLAMA_HOST,
         ollama_model=model,
     )
     if _LLM_BACKEND:
-        ollama_logger.info(f"[WEBAPP] Ollama ATTIVO su {_OLLAMA_HOST}")
+        ollama_logger.info(f"[OLLAMA] Connesso e pronto → {_OLLAMA_HOST}")
     else:
-        ollama_logger.warning(f"[WEBAPP] Ollama NON disponibile su {_OLLAMA_HOST} — solo regole deterministiche")
+        ollama_logger.warning(
+            f"[OLLAMA] Non disponibile su {_OLLAMA_HOST} "
+            f"— conversione solo con regole deterministiche"
+        )
+
 
 # Tenta la connessione all'avvio
+log.info("[APP] ═══ Avvio SAS→PySpark Converter v%s ═══", _VERSION)
 _init_llm_backend()
 
 
@@ -125,22 +158,30 @@ def run_conversion(
     5. DataFrame blocchi (16 colonne)
     6. DataFrame statistiche
     7. DataFrame regole classificazione
-
-    use_llm: se True e Ollama è disponibile, usa il LLM come fallback
-             per i blocchi non convertibili dalle regole deterministiche.
-
-    Restituisce un dizionario con tutti i dati per il template HTML.
     """
-    # Pre-processore Livello 2 (opzionale)
+    t_pipeline = time.perf_counter()
+
+    # ── Pre-processore Livello 2 (opzionale) ────────────────────────
     pre_warnings = []
     if preprocess:
+        log.info("[APP] Pre-processore Livello 2: ATTIVO | macro_vars=%s", macro_vars or {})
         pre = SASMacroPreprocessor(known_vars=macro_vars or {})
         sas_code_resolved = pre.process(sas_code)
         pre_warnings = pre.warnings
+        log.info(
+            "[APP] Pre-processore completato | righe SAS: %d→%d | warning: %d",
+            len(sas_code.splitlines()),
+            len(sas_code_resolved.splitlines()),
+            len(pre_warnings),
+        )
+        if pre_warnings:
+            for w in pre_warnings:
+                log.debug("[APP]   warning pre-proc: %s", w)
     else:
+        log.info("[APP] Pre-processore Livello 2: DISATTIVO")
         sas_code_resolved = sas_code
 
-    # Scrive su file temporaneo (il parser accetta path)
+    # ── Scrivi su file temporaneo (il parser accetta path) ──────────
     with tempfile.NamedTemporaryFile(
         suffix=".sas", mode="w", delete=False, encoding="utf-8"
     ) as f:
@@ -149,13 +190,24 @@ def run_conversion(
 
     try:
         # 1. Parser gerarchico
+        log.info("[APP] Parser SAS → blocchi...")
         blocks = parse_sas_blocks_tracked(tmp_path)
+        log.info("[APP] Parser completato | blocchi trovati: %d", len(blocks))
 
         # 2. Codice PySpark completo (con LLM fallback se attivato)
         llm_backend = _LLM_BACKEND if use_llm else None
+        if use_llm:
+            if llm_backend:
+                log.info("[APP] LLM Ollama: ATTIVO come fallback")
+            else:
+                log.warning("[APP] LLM Ollama richiesto ma NON disponibile — solo regole")
+        else:
+            log.info("[APP] LLM Ollama: DISATTIVO")
+
+        log.info("[APP] Conversione blocchi → PySpark...")
         pyspark_code = convert_tree(blocks, llm_backend=llm_backend)
 
-        # 3. Mappa conversione per blocco (per colonna codice_pyspark nell'HTML)
+        # 3. Mappa conversione per blocco
         pyspark_map = convert_blocks_to_map(blocks, llm_backend=llm_backend)
 
         # 4. DataFrame blocchi con codice PySpark per blocco
@@ -169,6 +221,14 @@ def run_conversion(
 
         # Conteggio TODO per il banner
         todo_count = pyspark_code.count("# TODO")
+        py_lines   = len(pyspark_code.splitlines())
+
+        elapsed_pipeline = time.perf_counter() - t_pipeline
+        log.info(
+            "[APP] Conversione completata | blocchi: %d | righe PySpark: %d "
+            "| TODO: %d | tempo pipeline: %.2fs",
+            len(blocks), py_lines, todo_count, elapsed_pipeline,
+        )
 
         return {
             "ok": True,
@@ -213,6 +273,7 @@ def _df_to_records(df) -> list:
 @app.route("/", methods=["GET"])
 def index():
     """Pagina principale con form di input SAS."""
+    log.info("[APP] GET / — pagina principale")
     return render_template("index.html", version=_VERSION)
 
 
@@ -221,6 +282,7 @@ def convert():
     """Esegue la conversione e mostra i risultati."""
     sas_code = request.form.get("sas_code", "").strip()
     if not sas_code:
+        log.warning("[APP] POST /convert — testo SAS vuoto, redirect a home")
         return redirect(url_for("index"))
 
     preprocess   = bool(request.form.get("preprocess"))
@@ -228,19 +290,49 @@ def convert():
     macro_vars_r = request.form.get("macro_vars", "").strip()
     macro_vars   = _parse_macro_vars(macro_vars_r) if macro_vars_r else {}
 
+    client_ip    = request.remote_addr or "?"
+    sas_lines    = len(sas_code.splitlines())
+    sas_chars    = len(sas_code)
+
+    log.info(
+        "[APP] ── Nuova richiesta di conversione ──────────────────────────"
+    )
+    log.info(
+        "[APP] client=%s | SAS: %d righe, %d chars",
+        client_ip, sas_lines, sas_chars,
+    )
+    log.info(
+        "[APP] config | preprocess=%s | use_llm=%s | macro_vars=%s",
+        "ON" if preprocess else "OFF",
+        "ON" if use_llm    else "OFF",
+        macro_vars or "(nessuna)",
+    )
+
     t0 = time.perf_counter()
     try:
         result = run_conversion(
             sas_code, preprocess=preprocess, macro_vars=macro_vars, use_llm=use_llm,
         )
     except Exception as exc:
+        elapsed = time.perf_counter() - t0
+        log.error(
+            "[APP] ERRORE durante la conversione dopo %.2fs: %s: %s",
+            elapsed, type(exc).__name__, exc,
+        )
         return render_template(
             "index.html",
             version=_VERSION,
             error=str(exc),
             sas_code=sas_code,
         )
+
     elapsed = time.perf_counter() - t0
+    log.info(
+        "[APP] Risposta pronta | tempo totale: %.2fs | "
+        "blocchi: %d | TODO: %d",
+        elapsed, result["block_count"], result["todo_count"],
+    )
+    log.info("[APP] ─────────────────────────────────────────────────────────")
 
     # Converte DataFrame → liste di dict per Jinja2
     blocks_records = _df_to_records(result["blocks_df"])
@@ -271,6 +363,7 @@ def convert():
 @app.route("/docs/<path:filename>")
 def serve_docs(filename):
     """Serve i file HTML della documentazione da docs/."""
+    log.debug("[APP] GET /docs/%s", filename)
     return send_from_directory("docs", filename)
 
 
@@ -291,4 +384,5 @@ def health():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_ENV", "production") == "development"
+    log.info("[APP] Server Flask avviato | porta=%d | debug=%s", port, debug)
     app.run(host="0.0.0.0", port=port, debug=debug)

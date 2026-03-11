@@ -1,16 +1,15 @@
 {
-  "_comment": "Configurazione LLM per la conversione SAS -> PySpark. Rinominare questo file in llm_config.json e adattare i valori.",
+  "_comment": "Configurazione LLM per la conversione SAS -> PySpark. Adattare i valori all'ambiente.",
 
   "strategy": "auto",
 
   "ollama": {
-    "_comment": "Ollama locale o su cloud privato. Modelli consigliati: codestral, deepseek-coder:6.7b, codellama:13b",
-    "host":  "http://localhost:11434",
+    "_comment": "Host Ollama: configurato via variabile d'ambiente OLLAMA_HOST (docker-compose). Modelli consigliati: codestral, deepseek-coder:6.7b, codellama:13b",
     "model": "codestral"
   },
 
   "codestral": {
-    "_comment": "API OpenAI-compatible: Codestral/Mistral, vLLM, llama.cpp server. Endpoint = host + /chat/completions",
+    "_comment": "API OpenAI-compatible: Codestral/Mistral, vLLM, llama.cpp server. Endpoint = host + /v1/chat/completions",
     "host":    "http://localhost:8080/v1",
     "api_key": "not-needed",
     "model":   "codestral-latest"
