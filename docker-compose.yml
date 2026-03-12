@@ -30,6 +30,8 @@ services:
       - ./output:/app/output
       # INPUT: monta la cartella SAS sorgente (opzionale)
       - ./INPUT:/app/INPUT:ro
+      # Log persistenti: converter.log e io_requests.log sopravvivono al restart
+      - ./logs:/app/logs
 
     # Permette al container di raggiungere Ollama sulla VM host
     # L'app Flask usa OLLAMA_HOST per connettersi al LLM locale
