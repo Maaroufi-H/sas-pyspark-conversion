@@ -4,8 +4,8 @@
   "strategy": "auto",
 
   "ollama": {
-    "_comment": "Host Ollama: configurato via variabile d'ambiente OLLAMA_HOST (docker-compose). Modelli consigliati: codestral, deepseek-coder:6.7b, codellama:13b",
-    "model": "codestral"
+    "_comment": "Host Ollama: configurato via variabile d'ambiente OLLAMA_HOST (docker-compose). Modelli consigliati: qwen2.5-coder:7b (~4.7GB), deepseek-coder:6.7b, codellama:13b",
+    "model": "qwen2.5-coder:7b"
   },
 
   "codestral": {
