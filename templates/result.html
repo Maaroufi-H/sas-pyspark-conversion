@@ -736,17 +736,31 @@ function filterTable() {
       .replace(/>/g, '&gt;');
   }
 
+  // ORDINE CRITICO: le regex che inseriscono <span> devono essere applicate
+  // prima delle regex che potrebbero matchare attributi HTML degli span già inseriti.
+  //
+  // Bug precedente: la regex keywords includeva "class" che matchava dentro
+  // class="cmmt" già inserito, producendo <span <span class="kw">class</span>="cmmt">
+  // che il browser mostrava come testo letterale class="cmmt">.
+  //
+  // Soluzione: si applica prima le keywords (su testo puro senza span),
+  // poi commenti/TODO (che wrappano righe intere includendo gli span keyword),
+  // poi stringhe (su testo non ancora toccato a livello di riga).
+  // "class" è rimosso dalla lista keyword: non è mai usato come token
+  // nel codice PySpark generato dal converter.
+
   let html = _escHtml(_plainCode)
-    /* TODO lines → giallo */
+    /* keywords Python — PRIMA, su testo privo di span HTML
+       NOTA: "class" rimosso deliberatamente per non corrompere class="cmmt/todo" */
+    .replace(/\b(def|return|if|else|elif|for|while|import|from|as|with|try|except|finally|pass|True|False|None)\b/g,
+             '<span class="kw">$1</span>')
+    /* TODO lines → giallo (intera riga, dopo keywords) */
     .replace(/(^.*# TODO.*$)/gm, '<span class="todo">$1</span>')
-    /* commenti # → grigio (non TODO) */
+    /* commenti # → grigio, non TODO (intera riga, dopo keywords) */
     .replace(/(^[ \t]*#(?!.*TODO).*$)/gm, '<span class="cmmt">$1</span>')
     /* stringhe """...""" e '...' */
     .replace(/("""[\s\S]*?""")/g, '<span class="str">$1</span>')
-    .replace(/('(?:[^'\\]|\\.)*')/g, '<span class="str">$1</span>')
-    /* keywords Python */
-    .replace(/\b(def|class|return|if|else|elif|for|while|import|from|as|with|try|except|finally|pass|True|False|None)\b/g,
-             '<span class="kw">$1</span>');
+    .replace(/('(?:[^'\\]|\\.)*')/g, '<span class="str">$1</span>');
 
   pre.innerHTML = html;
 })();
