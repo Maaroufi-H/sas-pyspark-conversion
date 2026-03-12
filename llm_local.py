@@ -133,7 +133,7 @@ class OllamaConverter:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(probe_req, timeout=30) as resp:
+            with urllib.request.urlopen(probe_req, timeout=90) as resp:
                 pass  # successo: il modello è in memoria e risponde
             _log.info(f"[OLLAMA] Probe OK → modello '{self.model}' caricato in memoria")
             return True
