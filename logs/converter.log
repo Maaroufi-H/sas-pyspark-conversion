@@ -1,0 +1,165 @@
+2026-03-12 14:39:11 [INFO   ] [APP] ═══ Avvio SAS→PySpark Converter v1.0 ═══
+2026-03-12 14:39:11 [INFO   ] [OLLAMA] Inizializzazione | host=http://host.docker.internal:11434 | model=qwen2.5-coder:0.5b
+2026-03-12 14:39:11 [DEBUG  ] [OLLAMA] Check disponibilità → GET http://host.docker.internal:11434/api/tags
+2026-03-12 14:39:11 [INFO   ] [OLLAMA] Modelli presenti: ['qwen2.5-coder:0.5b', 'qwen2.5-coder:1.5b', 'qwen2.5-coder:7b', 'llama3.1:70b'] | 'qwen2.5-coder:0.5b' trovato: True
+2026-03-12 14:39:15 [INFO   ] [OLLAMA] Probe OK → modello 'qwen2.5-coder:0.5b' caricato in memoria
+2026-03-12 14:39:15 [INFO   ] [OLLAMA] Connesso e pronto → http://host.docker.internal:11434
+2026-03-12 14:39:15 [INFO   ] [APP] Server Flask avviato | porta=5000 | debug=False
+2026-03-12 14:39:31 [INFO   ] [APP] ── Nuova richiesta di conversione ──────────────────────────
+2026-03-12 14:39:31 [INFO   ] [APP] client=172.18.0.1 | SAS: 1 righe, 29 chars
+2026-03-12 14:39:31 [INFO   ] [APP] config | preprocess=OFF | use_llm=ON | macro_vars=(nessuna)
+2026-03-12 14:39:31 [INFO   ] [APP] Pre-processore Livello 2: DISATTIVO
+2026-03-12 14:39:31 [INFO   ] [APP] Parser SAS → blocchi...
+2026-03-12 14:39:31 [INFO   ] [APP] Parser completato | blocchi trovati: 1
+2026-03-12 14:39:31 [INFO   ] [APP] LLM Ollama: ATTIVO come fallback
+2026-03-12 14:39:31 [INFO   ] [APP] Conversione blocchi → PySpark...
+2026-03-12 14:39:31 [INFO   ] [APP] Conversione completata | blocchi: 1 | righe PySpark: 18 | TODO: 0 | tempo pipeline: 0.04s
+2026-03-12 14:39:31 [INFO   ] [APP] Risposta pronta | tempo totale: 0.04s | blocchi: 1 | TODO: 0
+2026-03-12 14:39:31 [INFO   ] [APP] ─────────────────────────────────────────────────────────
+2026-03-12 14:41:09 [INFO   ] [APP] GET / — pagina principale
+2026-03-12 14:41:28 [DEBUG  ] [APP] GET /pipeline
+2026-03-12 14:42:07 [WARNING] [APP] POST /convert — testo SAS vuoto, redirect a home
+2026-03-12 14:42:41 [INFO   ] [APP] ── Nuova richiesta di conversione ──────────────────────────
+2026-03-12 14:42:41 [INFO   ] [APP] client=172.18.0.1 | SAS: 1 righe, 65 chars
+2026-03-12 14:42:41 [INFO   ] [APP] config | preprocess=OFF | use_llm=ON | macro_vars=(nessuna)
+2026-03-12 14:42:41 [INFO   ] [APP] Pre-processore Livello 2: DISATTIVO
+2026-03-12 14:42:41 [INFO   ] [APP] Parser SAS → blocchi...
+2026-03-12 14:42:41 [INFO   ] [APP] Parser completato | blocchi trovati: 1
+2026-03-12 14:42:41 [INFO   ] [APP] LLM Ollama: ATTIVO come fallback
+2026-03-12 14:42:41 [INFO   ] [APP] Conversione blocchi → PySpark...
+2026-03-12 14:42:41 [DEBUG  ] [OLLAMA] Check disponibilità → GET http://host.docker.internal:11434/api/tags
+2026-03-12 14:42:41 [INFO   ] [OLLAMA] Modelli presenti: ['qwen2.5-coder:0.5b', 'qwen2.5-coder:1.5b', 'qwen2.5-coder:7b', 'llama3.1:70b'] | 'qwen2.5-coder:0.5b' trovato: True
+2026-03-12 14:42:42 [INFO   ] [OLLAMA] Probe OK → modello 'qwen2.5-coder:0.5b' caricato in memoria
+2026-03-12 14:42:42 [INFO   ] [OLLAMA] Invio richiesta | model=qwen2.5-coder:0.5b | categoria='DATA_STEP' | SAS=65 chars
+2026-03-12 14:42:56 [INFO   ] [OLLAMA] Risposta ricevuta | 14.7s | 132 chars output
+2026-03-12 14:42:56 [INFO   ] [APP] Conversione completata | blocchi: 1 | righe PySpark: 28 | TODO: 1 | tempo pipeline: 15.81s
+2026-03-12 14:42:56 [INFO   ] [APP] Risposta pronta | tempo totale: 15.81s | blocchi: 1 | TODO: 1
+2026-03-12 14:42:56 [INFO   ] [APP] ─────────────────────────────────────────────────────────
+2026-03-12 14:45:51 [INFO   ] [APP] GET / — pagina principale
+2026-03-12 14:46:02 [DEBUG  ] [APP] GET /pipeline
+2026-03-12 14:46:33 [INFO   ] [APP] GET / — pagina principale
+2026-03-12 14:47:31 [INFO   ] [APP] ── Nuova richiesta di conversione ──────────────────────────
+2026-03-12 14:47:31 [INFO   ] [APP] client=93.55.208.69 | SAS: 24 righe, 318 chars
+2026-03-12 14:47:31 [INFO   ] [APP] config | preprocess=OFF | use_llm=OFF | macro_vars=(nessuna)
+2026-03-12 14:47:31 [INFO   ] [APP] Pre-processore Livello 2: DISATTIVO
+2026-03-12 14:47:31 [INFO   ] [APP] Parser SAS → blocchi...
+2026-03-12 14:47:31 [INFO   ] [APP] Parser completato | blocchi trovati: 4
+2026-03-12 14:47:31 [INFO   ] [APP] LLM Ollama: DISATTIVO
+2026-03-12 14:47:31 [INFO   ] [APP] Conversione blocchi → PySpark...
+2026-03-12 14:47:32 [INFO   ] [APP] Conversione completata | blocchi: 4 | righe PySpark: 27 | TODO: 0 | tempo pipeline: 0.05s
+2026-03-12 14:47:32 [INFO   ] [APP] Risposta pronta | tempo totale: 0.05s | blocchi: 4 | TODO: 0
+2026-03-12 14:47:32 [INFO   ] [APP] ─────────────────────────────────────────────────────────
+2026-03-12 14:47:37 [INFO   ] [APP] GET / — pagina principale
+2026-03-12 14:47:41 [INFO   ] [APP] ── Nuova richiesta di conversione ──────────────────────────
+2026-03-12 14:47:41 [INFO   ] [APP] client=93.55.208.69 | SAS: 24 righe, 318 chars
+2026-03-12 14:47:41 [INFO   ] [APP] config | preprocess=OFF | use_llm=ON | macro_vars=(nessuna)
+2026-03-12 14:47:41 [INFO   ] [APP] Pre-processore Livello 2: DISATTIVO
+2026-03-12 14:47:41 [INFO   ] [APP] Parser SAS → blocchi...
+2026-03-12 14:47:41 [INFO   ] [APP] Parser completato | blocchi trovati: 4
+2026-03-12 14:47:41 [INFO   ] [APP] LLM Ollama: ATTIVO come fallback
+2026-03-12 14:47:41 [INFO   ] [APP] Conversione blocchi → PySpark...
+2026-03-12 14:47:41 [INFO   ] [APP] Conversione completata | blocchi: 4 | righe PySpark: 27 | TODO: 0 | tempo pipeline: 0.02s
+2026-03-12 14:47:41 [INFO   ] [APP] Risposta pronta | tempo totale: 0.02s | blocchi: 4 | TODO: 0
+2026-03-12 14:47:41 [INFO   ] [APP] ─────────────────────────────────────────────────────────
+2026-03-12 14:48:13 [INFO   ] [APP] ── Nuova richiesta di conversione ──────────────────────────
+2026-03-12 14:48:13 [INFO   ] [APP] client=93.55.208.69 | SAS: 24 righe, 318 chars
+2026-03-12 14:48:13 [INFO   ] [APP] config | preprocess=OFF | use_llm=ON | macro_vars=(nessuna)
+2026-03-12 14:48:13 [INFO   ] [APP] Pre-processore Livello 2: DISATTIVO
+2026-03-12 14:48:13 [INFO   ] [APP] Parser SAS → blocchi...
+2026-03-12 14:48:13 [INFO   ] [APP] Parser completato | blocchi trovati: 4
+2026-03-12 14:48:13 [INFO   ] [APP] LLM Ollama: ATTIVO come fallback
+2026-03-12 14:48:13 [INFO   ] [APP] Conversione blocchi → PySpark...
+2026-03-12 14:48:13 [INFO   ] [APP] Conversione completata | blocchi: 4 | righe PySpark: 27 | TODO: 0 | tempo pipeline: 0.02s
+2026-03-12 14:48:13 [INFO   ] [APP] Risposta pronta | tempo totale: 0.02s | blocchi: 4 | TODO: 0
+2026-03-12 14:48:13 [INFO   ] [APP] ─────────────────────────────────────────────────────────
+2026-03-12 14:48:25 [INFO   ] [APP] ── Nuova richiesta di conversione ──────────────────────────
+2026-03-12 14:48:25 [INFO   ] [APP] client=93.55.208.69 | SAS: 24 righe, 318 chars
+2026-03-12 14:48:25 [INFO   ] [APP] config | preprocess=OFF | use_llm=ON | macro_vars=(nessuna)
+2026-03-12 14:48:25 [INFO   ] [APP] Pre-processore Livello 2: DISATTIVO
+2026-03-12 14:48:25 [INFO   ] [APP] Parser SAS → blocchi...
+2026-03-12 14:48:25 [INFO   ] [APP] Parser completato | blocchi trovati: 4
+2026-03-12 14:48:25 [INFO   ] [APP] LLM Ollama: ATTIVO come fallback
+2026-03-12 14:48:25 [INFO   ] [APP] Conversione blocchi → PySpark...
+2026-03-12 14:48:25 [INFO   ] [APP] Conversione completata | blocchi: 4 | righe PySpark: 27 | TODO: 0 | tempo pipeline: 0.02s
+2026-03-12 14:48:25 [INFO   ] [APP] Risposta pronta | tempo totale: 0.02s | blocchi: 4 | TODO: 0
+2026-03-12 14:48:25 [INFO   ] [APP] ─────────────────────────────────────────────────────────
+2026-03-12 14:48:45 [INFO   ] [APP] GET / — pagina principale
+2026-03-12 14:49:02 [INFO   ] [APP] ── Nuova richiesta di conversione ──────────────────────────
+2026-03-12 14:49:02 [INFO   ] [APP] client=93.55.208.69 | SAS: 24 righe, 318 chars
+2026-03-12 14:49:02 [INFO   ] [APP] config | preprocess=OFF | use_llm=OFF | macro_vars=(nessuna)
+2026-03-12 14:49:02 [INFO   ] [APP] Pre-processore Livello 2: DISATTIVO
+2026-03-12 14:49:02 [INFO   ] [APP] Parser SAS → blocchi...
+2026-03-12 14:49:02 [INFO   ] [APP] Parser completato | blocchi trovati: 4
+2026-03-12 14:49:02 [INFO   ] [APP] LLM Ollama: DISATTIVO
+2026-03-12 14:49:02 [INFO   ] [APP] Conversione blocchi → PySpark...
+2026-03-12 14:49:02 [INFO   ] [APP] Conversione completata | blocchi: 4 | righe PySpark: 27 | TODO: 0 | tempo pipeline: 0.02s
+2026-03-12 14:49:02 [INFO   ] [APP] Risposta pronta | tempo totale: 0.03s | blocchi: 4 | TODO: 0
+2026-03-12 14:49:02 [INFO   ] [APP] ─────────────────────────────────────────────────────────
+2026-03-12 14:49:21 [INFO   ] [APP] GET / — pagina principale
+2026-03-12 14:49:37 [INFO   ] [APP] ── Nuova richiesta di conversione ──────────────────────────
+2026-03-12 14:49:37 [INFO   ] [APP] client=93.55.208.69 | SAS: 24 righe, 318 chars
+2026-03-12 14:49:37 [INFO   ] [APP] config | preprocess=OFF | use_llm=ON | macro_vars=(nessuna)
+2026-03-12 14:49:37 [INFO   ] [APP] Pre-processore Livello 2: DISATTIVO
+2026-03-12 14:49:37 [INFO   ] [APP] Parser SAS → blocchi...
+2026-03-12 14:49:37 [INFO   ] [APP] Parser completato | blocchi trovati: 4
+2026-03-12 14:49:37 [INFO   ] [APP] LLM Ollama: ATTIVO come fallback
+2026-03-12 14:49:37 [INFO   ] [APP] Conversione blocchi → PySpark...
+2026-03-12 14:49:37 [INFO   ] [APP] Conversione completata | blocchi: 4 | righe PySpark: 27 | TODO: 0 | tempo pipeline: 0.02s
+2026-03-12 14:49:37 [INFO   ] [APP] Risposta pronta | tempo totale: 0.02s | blocchi: 4 | TODO: 0
+2026-03-12 14:49:37 [INFO   ] [APP] ─────────────────────────────────────────────────────────
+2026-03-12 14:50:10 [INFO   ] [APP] GET / — pagina principale
+2026-03-12 14:50:14 [INFO   ] [APP] ── Nuova richiesta di conversione ──────────────────────────
+2026-03-12 14:50:14 [INFO   ] [APP] client=93.55.208.69 | SAS: 260 righe, 6169 chars
+2026-03-12 14:50:14 [INFO   ] [APP] config | preprocess=OFF | use_llm=ON | macro_vars=(nessuna)
+2026-03-12 14:50:14 [INFO   ] [APP] Pre-processore Livello 2: DISATTIVO
+2026-03-12 14:50:14 [INFO   ] [APP] Parser SAS → blocchi...
+2026-03-12 14:50:14 [INFO   ] [APP] Parser completato | blocchi trovati: 11
+2026-03-12 14:50:14 [INFO   ] [APP] LLM Ollama: ATTIVO come fallback
+2026-03-12 14:50:14 [INFO   ] [APP] Conversione blocchi → PySpark...
+2026-03-12 14:50:14 [DEBUG  ] [OLLAMA] Check disponibilità → GET http://host.docker.internal:11434/api/tags
+2026-03-12 14:50:14 [INFO   ] [OLLAMA] Modelli presenti: ['qwen2.5-coder:0.5b', 'qwen2.5-coder:1.5b', 'qwen2.5-coder:7b', 'llama3.1:70b'] | 'qwen2.5-coder:0.5b' trovato: True
+2026-03-12 14:50:18 [INFO   ] [OLLAMA] Probe OK → modello 'qwen2.5-coder:0.5b' caricato in memoria
+2026-03-12 14:50:18 [INFO   ] [OLLAMA] Invio richiesta | model=qwen2.5-coder:0.5b | categoria='DATA_STEP' | SAS=1041 chars
+2026-03-12 14:50:46 [INFO   ] [OLLAMA] Risposta ricevuta | 28.8s | 132 chars output
+2026-03-12 14:50:46 [DEBUG  ] [OLLAMA] Check disponibilità → GET http://host.docker.internal:11434/api/tags
+2026-03-12 14:50:46 [INFO   ] [OLLAMA] Modelli presenti: ['qwen2.5-coder:0.5b', 'qwen2.5-coder:1.5b', 'qwen2.5-coder:7b', 'llama3.1:70b'] | 'qwen2.5-coder:0.5b' trovato: True
+2026-03-12 14:50:48 [INFO   ] [OLLAMA] Probe OK → modello 'qwen2.5-coder:0.5b' caricato in memoria
+2026-03-12 14:50:48 [INFO   ] [OLLAMA] Invio richiesta | model=qwen2.5-coder:0.5b | categoria='DATA_STEP' | SAS=886 chars
+2026-03-12 14:51:34 [INFO   ] [OLLAMA] Risposta ricevuta | 46.6s | 771 chars output
+2026-03-12 14:51:34 [DEBUG  ] [OLLAMA] Check disponibilità → GET http://host.docker.internal:11434/api/tags
+2026-03-12 14:51:34 [INFO   ] [OLLAMA] Modelli presenti: ['qwen2.5-coder:0.5b', 'qwen2.5-coder:1.5b', 'qwen2.5-coder:7b', 'llama3.1:70b'] | 'qwen2.5-coder:0.5b' trovato: True
+2026-03-12 14:51:36 [INFO   ] [OLLAMA] Probe OK → modello 'qwen2.5-coder:0.5b' caricato in memoria
+2026-03-12 14:51:36 [INFO   ] [OLLAMA] Invio richiesta | model=qwen2.5-coder:0.5b | categoria='DATA_STEP' | SAS=359 chars
+2026-03-12 14:52:14 [INFO   ] [OLLAMA] Risposta ricevuta | 38.6s | 793 chars output
+2026-03-12 14:52:14 [DEBUG  ] [OLLAMA] Check disponibilità → GET http://host.docker.internal:11434/api/tags
+2026-03-12 14:52:14 [INFO   ] [OLLAMA] Modelli presenti: ['qwen2.5-coder:0.5b', 'qwen2.5-coder:1.5b', 'qwen2.5-coder:7b', 'llama3.1:70b'] | 'qwen2.5-coder:0.5b' trovato: True
+2026-03-12 14:52:16 [INFO   ] [OLLAMA] Probe OK → modello 'qwen2.5-coder:0.5b' caricato in memoria
+2026-03-12 14:52:16 [INFO   ] [OLLAMA] Invio richiesta | model=qwen2.5-coder:0.5b | categoria='DATA_STEP' | SAS=1613 chars
+2026-03-12 14:53:16 [INFO   ] [OLLAMA] Risposta ricevuta | 59.9s | 667 chars output
+2026-03-12 14:53:16 [DEBUG  ] [OLLAMA] Check disponibilità → GET http://host.docker.internal:11434/api/tags
+2026-03-12 14:53:16 [INFO   ] [OLLAMA] Modelli presenti: ['qwen2.5-coder:0.5b', 'qwen2.5-coder:1.5b', 'qwen2.5-coder:7b', 'llama3.1:70b'] | 'qwen2.5-coder:0.5b' trovato: True
+2026-03-12 14:53:17 [INFO   ] [OLLAMA] Probe OK → modello 'qwen2.5-coder:0.5b' caricato in memoria
+2026-03-12 14:53:17 [INFO   ] [OLLAMA] Invio richiesta | model=qwen2.5-coder:0.5b | categoria='DATA_STEP' | SAS=451 chars
+2026-03-12 14:53:36 [INFO   ] [OLLAMA] Risposta ricevuta | 18.4s | 132 chars output
+2026-03-12 14:53:36 [DEBUG  ] [OLLAMA] Check disponibilità → GET http://host.docker.internal:11434/api/tags
+2026-03-12 14:53:36 [INFO   ] [OLLAMA] Modelli presenti: ['qwen2.5-coder:0.5b', 'qwen2.5-coder:1.5b', 'qwen2.5-coder:7b', 'llama3.1:70b'] | 'qwen2.5-coder:0.5b' trovato: True
+2026-03-12 14:53:37 [INFO   ] [OLLAMA] Probe OK → modello 'qwen2.5-coder:0.5b' caricato in memoria
+2026-03-12 14:53:37 [INFO   ] [OLLAMA] Invio richiesta | model=qwen2.5-coder:0.5b | categoria='DATA_STEP' | SAS=359 chars
+2026-03-12 14:54:16 [INFO   ] [OLLAMA] Risposta ricevuta | 38.6s | 736 chars output
+2026-03-12 14:54:16 [DEBUG  ] [OLLAMA] Check disponibilità → GET http://host.docker.internal:11434/api/tags
+2026-03-12 14:54:16 [INFO   ] [OLLAMA] Modelli presenti: ['qwen2.5-coder:0.5b', 'qwen2.5-coder:1.5b', 'qwen2.5-coder:7b', 'llama3.1:70b'] | 'qwen2.5-coder:0.5b' trovato: True
+2026-03-12 14:54:17 [INFO   ] [OLLAMA] Probe OK → modello 'qwen2.5-coder:0.5b' caricato in memoria
+2026-03-12 14:54:17 [INFO   ] [OLLAMA] Invio richiesta | model=qwen2.5-coder:0.5b | categoria='DATA_STEP' | SAS=1179 chars
+2026-03-12 14:55:09 [INFO   ] [OLLAMA] Risposta ricevuta | 52.1s | 593 chars output
+2026-03-12 14:55:09 [INFO   ] [APP] Conversione completata | blocchi: 11 | righe PySpark: 130 | TODO: 2 | tempo pipeline: 295.36s
+2026-03-12 14:55:09 [INFO   ] [APP] Risposta pronta | tempo totale: 295.36s | blocchi: 11 | TODO: 2
+2026-03-12 14:55:09 [INFO   ] [APP] ─────────────────────────────────────────────────────────
+2026-03-12 15:22:54 [INFO   ] [APP] ═══ Avvio SAS→PySpark Converter v1.0 ═══
+2026-03-12 15:22:54 [INFO   ] [OLLAMA] Inizializzazione | host=http://host.docker.internal:11434 | model=qwen2.5-coder:0.5b
+2026-03-12 15:22:54 [DEBUG  ] [OLLAMA] Check disponibilità → GET http://host.docker.internal:11434/api/tags
+2026-03-12 15:22:54 [INFO   ] [OLLAMA] Modelli presenti: ['qwen2.5-coder:0.5b', 'qwen2.5-coder:1.5b', 'qwen2.5-coder:7b', 'llama3.1:70b'] | 'qwen2.5-coder:0.5b' trovato: True
+2026-03-12 15:22:58 [INFO   ] [OLLAMA] Probe OK → modello 'qwen2.5-coder:0.5b' caricato in memoria
+2026-03-12 15:22:58 [INFO   ] [OLLAMA] Connesso e pronto → http://host.docker.internal:11434
+2026-03-12 15:22:58 [INFO   ] [APP] Server Flask avviato | porta=5000 | debug=False
+2026-03-12 15:29:29 [DEBUG  ] [APP] GET /pipeline
+2026-03-12 15:29:29 [INFO   ] [APP] GET / — pagina principale

@@ -1,368 +1,262 @@
-﻿options mprint;
-%MACRO aggregazione(livello);
+﻿option mlogic;
+data  join1;
+	length  Unita_Org_Comp_Desc $256.
+			Codice 8
+			Prodotto_CODE    $ 24
+			Event_Type_CODE  $ 24;
 
-%put AGGREG&livello;
-ods select none;
+	if _n_=0 then
+		set QUERY_FOR_RECUPERI2(keep=
+            Data_Creazione
+			Importo
+			id_WF_Status_CODE
+			evento_recod
+			Data_Contabilizzazione
+		);
 
-proc tabulate data=PERDITE_UOCE out=PERDITE_UOCE_AGGR missing;
-  class AGGREG&livello prodotto_DESC;
-  var SUM_of_SUM_of_Importo;
-  table prodotto_DESC,AGGREG&livello*SUM_of_SUM_of_Importo='somma';
-run;
-
-ods select all;
-
-
-proc sql noprint;
-select distinct prodotto_DESC  into :prod1- from dati_dw.prodotto_canale
-where prodotto_cod in ( %if &nid = 1 %then %do;
-								 "&id_prodotto1."
-								%end;
-
-								%else %do;
-									%do i=1 %to &nid;
-										
-										%if &i ^= &nid %then %do;
-											"&&id_prodotto&i",
-										%end;
-
-										%else %do;
-											"&&id_prodotto&i"
-										%end;
-
-									%end;
-								%end;
-							   )
-;
-%let N_prod = &sqlobs;
-select distinct %if &livello = 1 %then %do;
-				canale_aggr
-				%end;
-				%if &livello = 2 %then %do;
-				aggreg
-				%end;
-				%if &livello = 3 %then %do;
-				aggreg2
-				%end;  into :col1- from dati_dw.aggregazioni
-;
-%let N_col = &sqlobs;
-quit;
-
-
-%do i = 1 %to &N_prod;
-data visualizza&i;
-	length prodotto $ 64;
-
-	if _N_ = 1 then do;
-
-		prodotto = "&&prod&i";
-
-		%do j = 1 %to &N_col.; &&col&j. = 0; %end;
-		output;
-	end;
-	
-	set PERDITE_UOCE_AGGR(where=(prodotto_DESC = "&&prod&i"));
-
-	prodotto = "&&prod&i";
-	%do j = 1 %to &N_col.;
-			
-		&&col&j. = 0;
-		if aggreg&livello = "&&col&j."	then &&col&j. = SUM_of_SUM_of_Importo_Sum /1000000;
-			
-	%end;
-	
-	KEEP prodotto %do j = 1 %to &N_col; &&col&j %end;;
-	output;
-	
-run;
-%end;
-
-data APPOGGIO;
-set %do i = 1 %to &N_prod; visualizza&i %end;;
-run;
-
-proc sql noprint;
-create table TAB_PERDITE&LIVELLO as
-select distinct t2.aggregazione, t1.prodotto,
-%do i = 1 %to &N_col;
-	%if &i = &N_col %then %do;
-		sum(t1.&&col&i) as &&col&i
-	%end;
-
-	%else %do;
-		sum(t1.&&col&i) as &&col&i, 
-	%end;
-%end;
-from APPOGGIO t1
-left join DATI_DW.prodotto_canale t2 on (t1.prodotto = t2.prodotto_desc)
-group by t1.prodotto, t2.aggregazione
-;
-/*
-create table riassunto as
-select distinct aggregazione,
-%do i = 1 %to &N_col;
-	sum(&&col&i) as &&col&i, 
-%end;
-sum(%do i = 1 %to &N_col;
-		%if &i = &N_col %then %do;
-			sum(&&col&i))
-		%end; 
-		%else %do;
-			sum(&&col&i),
-		%end; 
-	%end; as TOT
-from TAB_PERDITE&LIVELLO
-group by aggregazione
-;
-quit;
-*/
-proc delete data = PERDITE_UOCE_AGGR APPOGGIO %do i = 1 %to &N_prod; visualizza&i %end; ;
-run;
-/*
-proc export
-	data= TAB_PERDITE&LIVELLO
-	dbms=xlsx
-    outfile="/sas/staging/opt/sasop/pgm/SAS_standard/sascode/finale.xlsx"
-    replace;
-run;
-
-proc sql noprint;
-create table tab_new as
-select
-%do i = 1 %to &N_col;
-	
-	sum(&&col&i) as &&col&i, 
-
-%end;
-
-sum(%do i = 1 %to &N_col;
-		%if &i = &N_col %then %do;
-			sum(&&col&i))
-		%end; 
-		%else %do;
-			sum(&&col&i),
-		%end; 
-	%end; as TOT
-from TAB_PERDITE&LIVELLO
-;
-quit;
-
-proc transpose data=tab_new out=tab_new_transp;
-var %do i = 1 %to &N_col; &&col&i %end; tot;
-run;
-
-data tab_new;
-set tab_new_transp(rename=(_NAME_ = perd_op_nette col1 = mln_euro ));
-run;
-
-*/
-   
-%mend;
-
-%macro varie_aggregazioni;
-
-	%if &livAgregg_count = 1 %then %do;
-		%let liv = %sysfunc(int(&livAgregg)); 
-		%aggregazione(livello = &liv)
-	%end;
-
-	%else %do;
-		%do k = 1 %to &livAgregg_count;
-			%let liv = %sysfunc(int(&&livAgregg&k)); 
-			%aggregazione(livello = &liv)
-		%end;
-	%end;
-
-%mend;
-
-proc import OUT= prodIn_cruscSettimanale
-            DATAFILE= "&path_excel./prodIn_cruscSettimanale.xlsx" 
-            DBMS=XLSX REPLACE;
-     		GETNAMES=YES;
-run;
-
-proc sql noprint;
-select distinct id 
-into :id_prodotto1-
-from prodIn_cruscSettimanale;
-quit;
-
-%let nid = &sqlobs;
-
-%macro vari_join;
-
-	proc sql;
-	create table PERDITE_UOCE as
-	select t1.*,
-	t2.riferimento /*as aggregaz*/,
-	t2.aggregazione as riassunto,
-	t3.cruscotto as aggreg1,
-	t4.aggreg as aggreg2,
-	t4.aggreg2 as aggreg3
-	from QUERY_FOR_PERDITEUOCE t1 
-	left join DATI_DW.prodotto_canale t2 on (t1.prodotto_code = t2.prodotto_cod)
-	left join DATI_DW.cod_frodi t3 on (t1.Event_Type_CODE = t3.Event_Type)
-	left join dati_dw.aggregazioni t4 on (t3.cruscotto = t4.canale_aggr)
-	where t1.prodotto_code in ( %if &nid = 1 %then %do;
-								 "&id_prodotto1."
-								%end;
-
-								%else %do;
-									%do i=1 %to &nid;
-										
-										%if &i ^= &nid %then %do;
-											"&&id_prodotto&i",
-										%end;
-
-										%else %do;
-											"&&id_prodotto&i"
-										%end;
-
-									%end;
-								%end;
-							   )
-	;
-	quit;
-
-	data PERDITE_UOCE;
-		set PERDITE_UOCE;
-		if aggreg1 = "" then aggreg1 = "altro";
-		if aggreg2 = "" then aggreg2 = "altro";
-		if aggreg3 = "" then aggreg3 = "altro";
-		%do i = 1 %to &nvar.;
-
-			&&campo&i.. = compress(translate(trimn(&&campo&i..),"_"," "), , 'kad');
-			if &&campo&i.. = "" then &&campo&i.. = "altro";
-
-		%end;
-	run;
-
-%mend vari_join;
-
-%macro perdite_frodi;
-
-%do k = 1 %to &nvar.;
-
-	ods select none;
-
-	proc tabulate data=PERDITE_UOCE out=PERDITE_UOCE_AGGR missing;
-	  class &&campo&k.. prodotto_DESC;
-	  var SUM_of_SUM_of_Importo;
-	  table prodotto_DESC,&&campo&k..*SUM_of_SUM_of_Importo='somma';
-	run;
-
-	ods select all;
-
-	
-	proc sql noprint;
-	select distinct prodotto_DESC  into :prod1- from dati_dw.prodotto_canale
-	where prodotto_cod in ( %if &nid = 1 %then %do;
-									 "&id_prodotto1."
-									%end;
-
-									%else %do;
-										%do i=1 %to &nid;
-											
-											%if &i ^= &nid %then %do;
-												"&&id_prodotto&i",
-											%end;
-
-											%else %do;
-												"&&id_prodotto&i"
-											%end;
-
-										%end;
-									%end;
-								   )
-	;
-	%let N_prod = &sqlobs;
-	select distinct &&campo&k.. into :col1- from PERDITE_UOCE
-	;
-	%let N_col = &sqlobs;
-	quit;
-
-	%do i = 1 %to &N_prod;
-	data visualizza&i;
-		length prodotto $ 64;
-
-		if _N_ = 1 then do;
-
-			prodotto = "&&prod&i";
-
-			%do j = 1 %to &N_col.;
-				%let old_col&j. = &&col&j.;
-				%let col&j. = %sysfunc(compress(&&col&j..,, ka));
-				%let col&j. = %substr(&&col&j.., 1, %sysfunc(min(32, %length(&&col&j..))));
-				&&col&j. = 0; 
-			%end;
-			output;
+	if _n_=1 then
+		do;
+			declare hash T2(hashexp:7, dataset:'dati_dw.eventi (where=(
+				%_eg_WhereParam( VALID_FROM_DTTM, Prompt_data, LE, TYPE=DT, IS_EXPLICIT=0 ) AND 
+				%_eg_WhereParam( VALID_TO_DTTM, Prompt_data, GE, TYPE=DT, IS_EXPLICIT=0 )))', multidata:'Y');
+			T2.definekey('Codice');
+			T2.definedata(  'Unita_Org_Comp_Desc', 
+					        'Codice', 
+					        'Event_Type_CODE', 
+					        'Prodotto_CODE');
+			T2.definedone();
+			call missing (of _ALL_);
 		end;
-		
-		set PERDITE_UOCE_AGGR(where=(prodotto_DESC = "&&prod&i"));
 
-		prodotto = "&&prod&i";
-		%do j = 1 %to &N_col.;
-				
-			&&col&j. = 0;
-			if &&campo&k.. = "&&old_col&j.."	then &&col&j. = SUM_of_SUM_of_Importo_Sum /1000000;
-				
-		%end;
-		
-		KEEP prodotto %do j = 1 %to &N_col; &&col&j %end;;
-		output;
-		
-	run;
-	%end;
-
-	data APPOGGIO;
-	set %do i = 1 %to &N_prod; visualizza&i %end;;
-	run;
-
-	proc sql noprint;
-	create table PERDITE_&&campo&k.. as
-	select distinct t2.aggregazione, t1.prodotto,
-	%do i = 1 %to &N_col;
-		%if &i = &N_col %then %do;
-			sum(t1.&&col&i) as &&col&i
-		%end;
-
-		%else %do;
-			sum(t1.&&col&i) as &&col&i, 
-		%end;
-	%end;
-	from APPOGGIO t1
-	left join DATI_DW.prodotto_canale t2 on (t1.prodotto = t2.prodotto_desc)
-	group by t1.prodotto, t2.aggregazione
-	;
-	
-	proc delete data = PERDITE_UOCE_AGGR APPOGGIO %do i = 1 %to &N_prod; visualizza&i %end; ;
-	run;
-%end;
-
-%mend;
-
-%let path_variabili = /sas/staging/opt/sasop/pgm/SAS_standard/sascode/Poste_RAFA/excel_aggregazioni;
-
-proc import OUT= var_frodi_reclami
-            DATAFILE= "&path_variabili./campi_perdite.xlsx" 
-            DBMS=XLSX REPLACE;
-     		GETNAMES=YES;
+	set QUERY_FOR_RECUPERI2(keep=
+            Data_Creazione
+			Importo
+			id_WF_Status_CODE
+			evento_recod
+			Data_Contabilizzazione
+			where=(Data_Contabilizzazione IS MISSING AND 
+			       Data_Creazione >= '1Jan2018:0:0:0'dt)
+		);
+	rc1=T2.find(key: evento_recod);
+	drop data_creazione;
 run;
 
-proc sql noprint;
-select distinct campo
-into :campo1-
-from var_frodi_reclami;
-quit;
+data join2;
+	length competenza $6. Prodotto_CODE $ 24;
 
-%let nvar = &sqlobs.;
+	if _n_=0 then
+		set join1;
 
+	if _n_=1 then
+		do;
+			declare hash T3(dataset:'dati_dw.mappa_prodotti',  multidata:'Y');
+			T3.definekey('Prodotto_CODE');
+			T3.definedata('Competenza', 'Prodotto_CODE');
+			T3.definedone();
+		end;
 
-%vari_join
-
-%varie_aggregazioni
-
-%perdite_frodi;
-
-proc delete data = prodIn_cruscSettimanale;
+	set join1(where=(Prodotto_CODE NOT IN 
+					  (
+			           '11',
+			           '30',
+			           '53',
+			           '56',
+			           '57',
+			           '58',
+			           '70',
+			           '72',
+			           '03',
+			           '17',
+			           '18',
+			           '35',
+			           '3',
+			           '42',
+			           '50',
+			           '63',
+			           '64',
+			           '69',
+			           '51',
+			           '52'
+			           ) AND
+				      Event_Type_CODE ^= '08_04_01_05'));
+	AnnoMeseCreaz = year(Data_Creazione)*100+month(Data_Creazione);
+	rc1=T3.find();
 run;
+
+data join3;
+	length Event_Type $24. cruscotto $ 64;
+
+	if _n_=0 then
+		set join2;
+
+	if _n_=1 then
+		do;
+			declare hash T3(dataset:'dati_dw.COD_FRODI',  multidata:'Y');
+			T3.definekey('Event_Type');
+			T3.definedata('Event_Type', 'cruscotto');
+			T3.definedone();
+		end;
+
+		set join2(where = (competenza = 'Imel_E'));
+	rc1=T3.find(key: Event_Type_CODE);
+run;
+
+
+data  join1;
+	length  Data_Creazione 8
+			Importo 8
+			id_WF_Status_CODE $ 64
+			evento_recod 8;
+
+	if _n_=0 then
+		set dati_dw.eventi (keep=Unita_Org_Comp_Desc 
+					        Codice 
+					        Event_Type_CODE 
+					        Prodotto_CODE);
+	if _n_=1 then
+		do;
+			declare hash T2(hashexp:7, dataset:'QUERY_FOR_RECUPERI2(where=(Data_Contabilizzazione IS MISSING))', multidata:'Y');
+			T2.definekey('evento_recod');
+			T2.definedata(  'Data_Creazione',
+							'Importo',
+							'id_WF_Status_CODE',
+							'evento_recod');
+			T2.definedone();
+			call missing (of _ALL_);
+		end;
+
+	set dati_dw.eventi (keep=Unita_Org_Comp_Desc 
+					        Codice 
+					        Event_Type_CODE 
+					        Prodotto_CODE 
+							VALID_FROM_DTTM
+							VALID_TO_DTTM
+						where=(
+				%_eg_WhereParam( VALID_FROM_DTTM, Prompt_data, LE, TYPE=DT, IS_EXPLICIT=0 ) AND 
+				%_eg_WhereParam( VALID_TO_DTTM, Prompt_data, GE, TYPE=DT, IS_EXPLICIT=0 ) AND
+				Prodotto_CODE NOT IN 
+			           (
+			           '11',
+			           '30',
+			           '53',
+			           '56',
+			           '57',
+			           '58',
+			           '70',
+			           '72',
+			           '03',
+			           '17',
+			           '18',
+			           '35',
+			           '3',
+			           '42',
+			           '50',
+			           '63',
+			           '64',
+			           '69',
+			           '51',
+			           '52'
+			           ) AND
+				Event_Type_CODE ^= '08_04_01_05'));
+	rc1 = T2.find(key: codice);
+	do while (rc1 = 0);
+        output;
+        rc1 = T2.find_next();
+    end;
+	format Data_Creazione datetime.;
+	drop VALID_TO_DTTM
+		 VALID_FROM_DTTM;
+run;
+
+data join2;
+	length competenza $6. Prodotto_CODE $ 24;
+
+	if _n_=0 then
+		set join1;
+
+	if _n_=1 then
+		do;
+			declare hash T3(dataset:'dati_dw.mappa_prodotti',  multidata:'Y');
+			T3.definekey('Prodotto_CODE');
+			T3.definedata('Competenza', 'Prodotto_CODE');
+			T3.definedone();
+		end;
+
+	set join1(where=(Data_Creazione >= '1Jan2018:0:0:0'dt));
+	AnnoMeseCreaz = year(datepart(Data_Creazione))*100+month(datepart(Data_Creazione));
+	rc1=T3.find();
+run;
+
+data join3;
+	length Event_Type $24. cruscotto $ 64;
+
+	if _n_=0 then
+		set join2;
+
+	if _n_=1 then
+		do;
+			declare hash T3(dataset:'dati_dw.COD_FRODI',  multidata:'Y');
+			T3.definekey('Event_Type');
+			T3.definedata('Event_Type', 'cruscotto');
+			T3.definedone();
+		end;
+
+		set join2(where = (competenza = 'Imel_E'));
+	rc1=T3.find(key: Event_Type_CODE);
+run;
+
+data _null_;
+	if 0 then
+		do;
+			set join3;
+		end;
+
+	if _N_=1 then
+		do;
+			declare hash T3(multidata:'Y',  hashexp: 20, ordered :'y' );
+			T3.definekey(			   
+			    'competenza',
+                'AnnoMeseCreaz',
+                'Unita_Org_Comp_Desc',
+                'cruscotto',
+                'id_WF_Status_CODE'
+				);
+			T3.definedata(
+				'competenza', 
+				'AnnoMeseCreaz',
+				'SUM_of_Importo1',
+				'Unita_Org_Comp_Desc', 
+				'cruscotto', 
+				'id_WF_Status_CODE');
+			T3.definedone();
+			before=input(getoption('xmrlmem'),20.);
+			format before sizekmg10.2;
+			put 'Hash Object before :' before;
+		end;
+
+	do until (eof);
+		set join3 end = eof;
+
+		if T3.find(
+			    KEY: competenza,
+                KEY: AnnoMeseCreaz,
+                KEY: Unita_Org_Comp_Desc,
+                KEY: cruscotto,
+                KEY: id_WF_Status_CODE) ne 0 then
+			do;
+				SUM_of_importo1=0;
+			end;
+
+		SUM_of_Importo1 + Importo;
+		T3.replace();
+	end;
+
+	after=input(getoption('xmrlmem'),20.);
+	format after sizekmg10.2;
+	put 'Hash Object after :' after;
+	hashsize=before-after;
+	rc = T3.output (dataset: "QUERY_FOR_RECUPERI_NV");
+	put 'Hash Object Takes Up:' hashsize sizekmg10.2;
+run;
+
+
