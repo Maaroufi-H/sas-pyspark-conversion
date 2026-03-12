@@ -55,7 +55,6 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB max upload
 
 _VERSION = "1.0"
-_REPO    = "https://github.com/Maaroufi-H/sas-pyspark-conversion"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -423,7 +422,6 @@ def convert():
     return render_template(
         "result.html",
         version=_VERSION,
-        repo=_REPO,
         elapsed=round(elapsed, 2),
         pyspark_code=result["pyspark_code"],
         todo_count=result["todo_count"],
@@ -463,7 +461,6 @@ def pipeline():
     return render_template(
         "pipeline.html",
         version=_VERSION,
-        repo=_REPO,
         llm_model=llm_model,
         ollama_ok=_LLM_BACKEND is not None,
     )

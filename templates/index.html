@@ -20,7 +20,15 @@
     header {
       background: linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%);
       border-bottom: 1px solid #2d4a6b;
-      padding: 2rem 2rem 1.5rem;
+      padding: 1.5rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    .header-center {
+      flex: 1;
       text-align: center;
     }
     header h1 {
@@ -35,6 +43,15 @@
       color: #94a3b8;
       font-size: 0.95rem;
     }
+    .header-nav a {
+      color: #94a3b8;
+      text-decoration: none;
+      font-size: 0.88rem;
+      margin-left: 1.5rem;
+      transition: color .15s;
+      white-space: nowrap;
+    }
+    .header-nav a:hover { color: #38bdf8; }
 
     /* ── MAIN ── */
     main {
@@ -294,8 +311,13 @@
 <body>
 
 <header>
-  <h1>SAS <span>→</span> PySpark Converter</h1>
-  <p>Incolla il tuo codice SAS e ottieni il codice PySpark equivalente con analisi dettagliata.</p>
+  <div class="header-center">
+    <h1>SAS <span>→</span> PySpark Converter</h1>
+    <p>Incolla il tuo codice SAS e ottieni il codice PySpark equivalente con analisi dettagliata.</p>
+  </div>
+  <nav class="header-nav">
+    <a href="/pipeline">Come funziona</a>
+  </nav>
 </header>
 
 <main>
@@ -384,9 +406,8 @@
 </main>
 
 <footer>
-  SAS → PySpark Converter v{{ version }} &nbsp;|&nbsp;
-  <a href="/pipeline">Come funziona</a> &nbsp;|&nbsp;
-  <a href="https://github.com/Maaroufi-H/sas-pyspark-conversion" target="_blank">GitHub</a>
+  SAS &#8594; PySpark Converter v{{ version }} &nbsp;|&nbsp;
+  <a href="/pipeline">Come funziona</a>
 </footer>
 
 <script>
