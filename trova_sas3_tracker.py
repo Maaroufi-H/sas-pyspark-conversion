@@ -412,40 +412,60 @@ def build_dataframe(
 # STATISTICHE RIASSUNTIVE
 # ═══════════════════════════════════════════════════════════════════
 def build_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """Crea un DataFrame di statistiche riassuntive per la sheet Excel."""
+    """
+    Crea un DataFrame di statistiche riassuntive per la sheet Excel / UI web.
+
+    Garantisce che TUTTI i blocchi compaiano nelle righe di categoria:
+    - usa value_counts(dropna=False) per includere categorie null/vuote
+    - sostituisce i valori null/vuoti con "(non classificato)"
+    - il TOTALE corrisponde sempre alla somma dei singoli tipi
+    """
     if df.empty:
         return pd.DataFrame()
 
+    # Normalizza le categorie mancanti
+    df = df.copy()
+    df["macro_categoria"] = (
+        df["macro_categoria"].fillna("(non classificato)").replace("", "(non classificato)")
+    )
+
     stats_rows = []
 
-    # Conteggio per macro_categoria
-    cat_counts = df["macro_categoria"].value_counts()
+    # Conteggio per macro_categoria — dropna=False include anche categorie vuote
+    cat_counts = df["macro_categoria"].value_counts(dropna=False)
     for cat, count in cat_counts.items():
         sub = df[df["macro_categoria"] == cat]
         n_conv_si = (sub["convertibile_auto"] == "SI").sum()
         n_conv_no = (sub["convertibile_auto"] == "NO").sum()
-        n_alta = (sub["affidabilita_auto"] == "ALTA").sum()
+        n_alta  = (sub["affidabilita_auto"] == "ALTA").sum()
         n_media = (sub["affidabilita_auto"] == "MEDIA").sum()
         n_bassa = (sub["affidabilita_auto"] == "BASSA").sum()
         stats_rows.append({
-            "macro_categoria": cat,
-            "totale_blocchi": count,
-            "convertibile_SI": int(n_conv_si),
-            "convertibile_NO": int(n_conv_no),
-            "affidabilita_ALTA": int(n_alta),
+            "macro_categoria":    str(cat) if cat is not None else "(non classificato)",
+            "totale_blocchi":     int(count),
+            "convertibile_SI":   int(n_conv_si),
+            "convertibile_NO":   int(n_conv_no),
+            "affidabilita_ALTA":  int(n_alta),
             "affidabilita_MEDIA": int(n_media),
             "affidabilita_BASSA": int(n_bassa),
         })
 
-    # Riga totale
+    # Riga TOTALE — calcolata sulla somma delle righe precedenti per coerenza
+    total_blocchi = sum(r["totale_blocchi"]   for r in stats_rows)
+    total_si      = sum(r["convertibile_SI"]  for r in stats_rows)
+    total_no      = sum(r["convertibile_NO"]  for r in stats_rows)
+    total_alta    = sum(r["affidabilita_ALTA"]  for r in stats_rows)
+    total_media   = sum(r["affidabilita_MEDIA"] for r in stats_rows)
+    total_bassa   = sum(r["affidabilita_BASSA"] for r in stats_rows)
+
     stats_rows.append({
-        "macro_categoria": "TOTALE",
-        "totale_blocchi": len(df),
-        "convertibile_SI": int((df["convertibile_auto"] == "SI").sum()),
-        "convertibile_NO": int((df["convertibile_auto"] == "NO").sum()),
-        "affidabilita_ALTA": int((df["affidabilita_auto"] == "ALTA").sum()),
-        "affidabilita_MEDIA": int((df["affidabilita_auto"] == "MEDIA").sum()),
-        "affidabilita_BASSA": int((df["affidabilita_auto"] == "BASSA").sum()),
+        "macro_categoria":    "TOTALE",
+        "totale_blocchi":     total_blocchi,
+        "convertibile_SI":    total_si,
+        "convertibile_NO":    total_no,
+        "affidabilita_ALTA":  total_alta,
+        "affidabilita_MEDIA": total_media,
+        "affidabilita_BASSA": total_bassa,
     })
 
     return pd.DataFrame(stats_rows)

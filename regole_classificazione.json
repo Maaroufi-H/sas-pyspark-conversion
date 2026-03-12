@@ -1,8 +1,15 @@
 {
   "data": [
     {
-      "nome_regola": "Hash/Array/Retain/First./Last. - strutture non convertibili",
-      "keywords_presenti": ["\\bhash\\b", "\\barray\\b", "\\bretain\\b", "\\bfirst\\.", "\\blast\\."],
+      "nome_regola": "Hash Object (declare hash) - convertito in join/groupBy PySpark",
+      "keywords_presenti": ["\\bdeclare\\s+hash\\b"],
+      "logica": "ANY",
+      "convertibile": "SI",
+      "affidabilita": "MEDIA"
+    },
+    {
+      "nome_regola": "Array/Retain/First./Last. - strutture non convertibili automaticamente",
+      "keywords_presenti": ["\\barray\\b", "\\bretain\\b", "\\bfirst\\.", "\\blast\\."],
       "logica": "ANY",
       "convertibile": "NO",
       "affidabilita": "BASSA"

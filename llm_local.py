@@ -219,6 +219,61 @@ class OllamaConverter:
             _log.error(f"[OLLAMA] Errore di rete dopo {elapsed:.1f}s: {e}")
             return None
 
+    def convert_stream(
+        self,
+        sas_code: str,
+        parent_context: str = "",
+        block_category: str = "",
+    ):
+        """
+        Generator che yielda token via streaming Ollama (/api/generate stream:true).
+        Ogni elemento yielded è una stringa JSON SSE-ready:
+            '{"token": "...", "done": false}'  oppure
+            '{"token": "", "done": true}'
+
+        Usato dalla route Flask /stream_llm con Response(stream_with_context(...)).
+        """
+        prompt = self._build_prompt(sas_code, parent_context, block_category)
+
+        payload = json.dumps({
+            "model": self.model,
+            "prompt": prompt,
+            "system": _SYSTEM_PROMPT_SAS,
+            "stream": True,
+            "options": {
+                "temperature": self.temperature,
+                "num_predict": self.num_predict,
+            },
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            f"{self.host}/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                for raw_line in resp:
+                    raw_line = raw_line.strip()
+                    if not raw_line:
+                        continue
+                    try:
+                        chunk = json.loads(raw_line)
+                    except json.JSONDecodeError:
+                        continue
+                    token = chunk.get("response", "")
+                    done  = chunk.get("done", False)
+                    # Escapa il token per JSON embedding sicuro
+                    safe_token = token.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "")
+                    yield f'{{"token": "{safe_token}", "done": false}}'
+                    if done:
+                        break
+        except Exception as e:
+            _log.error(f"[OLLAMA] Errore streaming: {e}")
+
+        yield '{"token": "", "done": true}'
+
     def _build_prompt(
         self,
         sas_code: str,

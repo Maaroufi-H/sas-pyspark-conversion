@@ -741,6 +741,180 @@ def _todo_block(blk: dict, ctx: ConversionContext, reason: str) -> str:
     return "\n".join(lines)
 
 
+# ─── HASH OBJECT ──────────────────────────────────────────────────────
+
+def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
+    """
+    Converte un DATA step con declare hash in PySpark.
+
+    Tre sottocasi rilevati dal pattern del codice SAS:
+      1. Lookup semplice  : rc = T.find(key:k)  senza find_next
+         → broadcast join
+      2. Multidata loop   : T.find_next() in do while
+         → join normale (possibili righe duplicate)
+      3. Aggregazione     : data _null_ + T.replace() + T.output()
+         → groupBy().agg() + write
+
+    Estrae automaticamente: nome hash, dataset sorgente, chiavi,
+    colonne data, output dataset.
+    """
+    pad  = ctx.pad
+    txt  = blk.get("testo", "")
+    lines = [
+        f"{pad}# ── HASH OBJECT"
+        f" [riga {blk.get('linea_start')}–{blk.get('linea_stop')}] ──"
+    ]
+
+    # ── Trova tutti i blocchi declare hash ──────────────────────────
+    # declare hash T(hashexp:N, dataset:'lib.nome', multidata:'Y');
+    hash_defs = {}
+    for m in re.finditer(
+        r'\bdeclare\s+hash\s+(\w+)\s*\(([^)]*)\)\s*;',
+        txt, re.I | re.S
+    ):
+        h_name = m.group(1)
+        h_opts = m.group(2)
+        ds_m = re.search(r"dataset\s*:\s*['\"]([^'\"]+)['\"]", h_opts, re.I)
+        multi_m = re.search(r"multidata\s*:\s*['\"]Y['\"]", h_opts, re.I)
+        hash_defs[h_name] = {
+            "dataset": ds_m.group(1) if ds_m else None,
+            "multidata": bool(multi_m),
+            "keys": [],
+            "data": [],
+        }
+
+    # ── Raccoglie definekey / definedata ────────────────────────────
+    for h_name in hash_defs:
+        for m in re.finditer(
+            r'\b' + re.escape(h_name) + r'\s*\.\s*definekey\s*\(([^)]+)\)\s*;',
+            txt, re.I
+        ):
+            keys = [c.strip().strip("'\"") for c in m.group(1).split(',')]
+            hash_defs[h_name]["keys"].extend(keys)
+        for m in re.finditer(
+            r'\b' + re.escape(h_name) + r'\s*\.\s*definedata\s*\(([^)]+)\)\s*;',
+            txt, re.I
+        ):
+            cols = [c.strip().strip("'\"") for c in m.group(1).split(',')]
+            hash_defs[h_name]["data"].extend(cols)
+
+    # ── Determina il SET sorgente principale ────────────────────────
+    set_m = re.search(r'\bset\s+([\w.]+)\s*;', txt, re.I)
+    src_ds = set_m.group(1) if set_m else None
+    src_py = _sas_to_py_var(src_ds) if src_ds else "source_df"
+
+    # ── Riconosce il sottocaso ───────────────────────────────────────
+    is_null_data  = bool(re.match(r'^\s*data\s+_null_\s*;', txt, re.I))
+    has_find_next = bool(re.search(r'\.find_next\s*\(', txt, re.I))
+    has_output    = bool(re.search(r'\.output\s*\(', txt, re.I))
+    has_replace   = bool(re.search(r'\.replace\s*\(', txt, re.I))
+
+    # ── Caso 3: aggregazione (data _null_ + replace + output) ───────
+    if is_null_data and (has_replace or has_output):
+        # Determina output dataset
+        out_m = re.search(
+            r'\.output\s*\(\s*dataset\s*:\s*[\'"]([^\'"]+)[\'"]',
+            txt, re.I
+        )
+        out_ds   = out_m.group(1) if out_m else "hash_output"
+        out_py   = _sas_to_py_var(out_ds)
+
+        # Usa il primo hash definito come riferimento
+        first_h  = next(iter(hash_defs.values()), {})
+        grp_keys = first_h.get("keys", [])
+        agg_cols = [c for c in first_h.get("data", []) if c not in grp_keys]
+
+        if src_ds:
+            lines.append(f"{pad}# Hash aggregation → groupBy/agg")
+            grp_str = (
+                ", ".join(f'"{k}"' for k in grp_keys)
+                if grp_keys else '"TODO_GROUP_KEY"'
+            )
+            if agg_cols:
+                agg_exprs = ", ".join(
+                    f'F.sum("{c}").alias("SUM_of_{c}")' for c in agg_cols
+                )
+            else:
+                agg_exprs = "F.count(\"*\").alias(\"count\")"
+            lines.append(
+                f"{pad}{out_py} = spark.table(\"{src_ds}\")\\\n"
+                f"{pad}    .groupBy({grp_str})\\\n"
+                f"{pad}    .agg({agg_exprs})"
+            )
+            lines.append(
+                f"{pad}{out_py}.write.mode(\"overwrite\").saveAsTable(\"{out_ds}\")"
+            )
+        else:
+            lines.append(f"{pad}# TODO: sorgente SET non trovata nel blocco hash aggregation")
+        ctx.register_df(out_ds, out_py)
+        return "\n".join(lines)
+
+    # ── Genera codice per ogni hash definito ─────────────────────────
+    for h_name, h_info in hash_defs.items():
+        ds      = h_info["dataset"]
+        keys    = h_info["keys"]
+        data    = h_info["data"]
+        multi   = h_info["multidata"]
+        lkp_var = f"lookup_{h_name.lower()}"
+
+        if not ds:
+            lines.append(f"{pad}# {h_name}: dataset non rilevato → TODO")
+            continue
+
+        # Colonne da selezionare nel lookup
+        all_cols = list(dict.fromkeys(keys + data))  # dedup, ordine mantenuto
+        if all_cols:
+            sel_str = ", ".join(f'"{c}"' for c in all_cols)
+            lkp_expr = f'spark.table("{ds}").select({sel_str})'
+        else:
+            lkp_expr = f'spark.table("{ds}")'
+
+        # Chiave join
+        if len(keys) == 1:
+            on_str = f'on="{keys[0]}"'
+        elif keys:
+            on_str = "on=[" + ", ".join(f'"{k}"' for k in keys) + "]"
+        else:
+            on_str = 'on="TODO_KEY"'
+
+        if multi or has_find_next:
+            # Caso 2: multidata — join normale (possibili duplicati)
+            lines += [
+                f"{pad}# Hash multidata '{h_name}' → join (possibili righe multiple)",
+                f"{pad}{lkp_var} = {lkp_expr}",
+            ]
+            if src_ds:
+                out_names = [n for n in re.findall(r'^\s*data\s+(.+?)\s*;', txt, re.I | re.M)]
+                py_out = _sas_to_py_var(out_names[0]) if out_names else "join_result"
+                lines.append(
+                    f"{pad}{py_out} = spark.table(\"{src_ds}\")"
+                    f".join({lkp_var}, {on_str}, how=\"left\")"
+                )
+                ctx.register_df(out_names[0] if out_names else py_out, py_out)
+        else:
+            # Caso 1: lookup semplice → broadcast join
+            lines += [
+                f"{pad}# Hash lookup '{h_name}' → broadcast join",
+                f"{pad}{lkp_var} = {lkp_expr}",
+            ]
+            if src_ds:
+                out_names = [n for n in re.findall(r'^\s*data\s+(.+?)\s*;', txt, re.I | re.M)]
+                py_out = _sas_to_py_var(out_names[0]) if out_names else "join_result"
+                lines.append(
+                    f"{pad}{py_out} = spark.table(\"{src_ds}\")"
+                    f".join(F.broadcast({lkp_var}), {on_str}, how=\"left\")"
+                )
+                ctx.register_df(out_names[0] if out_names else py_out, py_out)
+
+    # ── call missing → commento ──────────────────────────────────────
+    if re.search(r'\bcall\s+missing\s*\(', txt, re.I):
+        lines.append(
+            f"{pad}# call missing(of _ALL_) — reset variabili: non necessario in PySpark"
+        )
+
+    return "\n".join(lines)
+
+
 # ─── DATA STEP ────────────────────────────────────────────────────────
 
 def convert_data_step(
@@ -762,10 +936,14 @@ def convert_data_step(
         f"[riga {blk.get('linea_start')}–{blk.get('linea_stop')}] ──"
     )
 
-    # ── COMPLEXITÉ HAUTE → TODO ─────────────────────────────────────
-    if info.has_hash or info.has_array:
+    # ── HASH OBJECT → handler dedicato ─────────────────────────────
+    if info.has_hash:
+        return _convert_hash_object(blk, ctx)
+
+    # ── ARRAY → TODO ─────────────────────────────────────────────────
+    if info.has_array:
         return _todo_block(blk, ctx,
-            "HASH OBJECT / ARRAY: riscrittura manuale necessaria")
+            "ARRAY SAS: riscrittura manuale necessaria")
 
     if info.has_retain or info.has_first_last:
         reason = "RETAIN / FIRST. LAST.: usare Window functions"

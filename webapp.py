@@ -33,7 +33,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Dict, Optional
 
-from flask import Flask, render_template, request, redirect, url_for, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory, Response, stream_with_context
 
 # ── Import pipeline di conversione ──────────────────────────────────
 from trova_sas3_tracker import (
@@ -433,6 +433,69 @@ def convert():
         categories=categories,
         preprocess=preprocess,
         macro_vars_raw=macro_vars_r,
+    )
+
+
+@app.route("/stream_llm", methods=["POST"])
+def stream_llm():
+    """
+    Endpoint SSE: converte un singolo blocco SAS via LLM in streaming.
+    Accetta JSON body: {"sas_code": "...", "block_category": "..."}
+    Ritorna text/event-stream con token progressivi.
+
+    Formato SSE per ogni token:
+        data: {"token": "...", "done": false}\n\n
+    Quando finito:
+        data: {"token": "", "done": true}\n\n
+
+    Usato dalla UI quando use_llm=true per mostrare la risposta in tempo reale.
+    """
+    if _LLM_BACKEND is None:
+        def _err():
+            yield 'data: {"token": "# LLM non disponibile", "done": false}\n\n'
+            yield 'data: {"token": "", "done": true}\n\n'
+        return Response(stream_with_context(_err()), mimetype="text/event-stream")
+
+    # Accetta sia JSON body che form
+    if request.is_json:
+        body         = request.get_json(silent=True) or {}
+        sas_code     = body.get("sas_code", "").strip()
+        block_cat    = body.get("block_category", "")
+    else:
+        sas_code     = request.form.get("sas_code", "").strip()
+        block_cat    = request.form.get("block_category", "")
+
+    if not sas_code:
+        def _empty():
+            yield 'data: {"token": "", "done": true}\n\n'
+        return Response(stream_with_context(_empty()), mimetype="text/event-stream")
+
+    log.info(
+        "[APP] GET /stream_llm | %d chars SAS | categoria=%r",
+        len(sas_code), block_cat,
+    )
+
+    # Verifica che il backend supporti lo streaming
+    if not hasattr(_LLM_BACKEND, "convert_stream"):
+        def _nosupport():
+            yield 'data: {"token": "# Streaming non supportato da questo backend LLM", "done": false}\n\n'
+            yield 'data: {"token": "", "done": true}\n\n'
+        return Response(stream_with_context(_nosupport()), mimetype="text/event-stream")
+
+    def _token_generator():
+        for sse_json in _LLM_BACKEND.convert_stream(
+            sas_code=sas_code,
+            block_category=block_cat,
+        ):
+            yield f"data: {sse_json}\n\n"
+
+    return Response(
+        stream_with_context(_token_generator()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # disabilita il buffering nginx/proxy
+        },
     )
 
 

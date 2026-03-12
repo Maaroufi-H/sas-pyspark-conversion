@@ -467,29 +467,44 @@
             <td>{{ row.macro_categoria }}</td>
             <td>{{ row.totale_blocchi | int }}</td>
             <td>
-              {% if row.convertibile_SI | int > 0 %}
-                <span class="badge-inline b-si">{{ row.convertibile_SI | int }}</span>
-              {% else %}–{% endif %}
+              {% set v = row.convertibile_SI | int %}
+              {% if v > 0 %}
+                <span class="badge-inline b-si">{{ v }}</span>
+              {% else %}
+                <span style="color:#475569">0</span>
+              {% endif %}
             </td>
             <td>
-              {% if row.convertibile_NO | int > 0 %}
-                <span class="badge-inline b-no">{{ row.convertibile_NO | int }}</span>
-              {% else %}–{% endif %}
+              {% set v = row.convertibile_NO | int %}
+              {% if v > 0 %}
+                <span class="badge-inline b-no">{{ v }}</span>
+              {% else %}
+                <span style="color:#475569">0</span>
+              {% endif %}
             </td>
             <td>
-              {% if row.affidabilita_ALTA | int > 0 %}
-                <span class="badge-inline b-alta">{{ row.affidabilita_ALTA | int }}</span>
-              {% else %}–{% endif %}
+              {% set v = row.affidabilita_ALTA | int %}
+              {% if v > 0 %}
+                <span class="badge-inline b-alta">{{ v }}</span>
+              {% else %}
+                <span style="color:#475569">0</span>
+              {% endif %}
             </td>
             <td>
-              {% if row.affidabilita_MEDIA | int > 0 %}
-                <span class="badge-inline b-media">{{ row.affidabilita_MEDIA | int }}</span>
-              {% else %}–{% endif %}
+              {% set v = row.affidabilita_MEDIA | int %}
+              {% if v > 0 %}
+                <span class="badge-inline b-media">{{ v }}</span>
+              {% else %}
+                <span style="color:#475569">0</span>
+              {% endif %}
             </td>
             <td>
-              {% if row.affidabilita_BASSA | int > 0 %}
-                <span class="badge-inline b-bassa">{{ row.affidabilita_BASSA | int }}</span>
-              {% else %}–{% endif %}
+              {% set v = row.affidabilita_BASSA | int %}
+              {% if v > 0 %}
+                <span class="badge-inline b-bassa">{{ v }}</span>
+              {% else %}
+                <span style="color:#475569">0</span>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -588,6 +603,8 @@
             <!-- Codice PySpark per blocco -->
             <td>
               {% set py_text = blk.codice_pyspark | default('') %}
+              {% set sas_raw = blk.testo | default('') %}
+              {% set is_todo = conv == 'NO' %}
               {% if py_text and py_text | length > 300 %}
               <div class="expandable">
                 <span class="cell-code content-short">{{ py_text[:300] | e }}…</span>
@@ -598,6 +615,18 @@
               <span class="cell-code">{{ py_text | e }}</span>
               {% else %}
               <span style="color:#334155">–</span>
+              {% endif %}
+              {% if is_todo and sas_raw %}
+              <button class="btn-llm-stream"
+                data-sas="{{ sas_raw | e }}"
+                data-cat="{{ blk.macro_categoria | default('') | e }}"
+                onclick="streamLlm(this)"
+                style="display:block;margin-top:.4rem;background:#0c1829;border:1px solid #38bdf8;
+                  color:#38bdf8;font-size:.72rem;padding:.2rem .6rem;border-radius:5px;
+                  cursor:pointer;white-space:nowrap"
+                title="Converti questo blocco con LLM in streaming">
+                &#129504; LLM
+              </button>
               {% endif %}
             </td>
           </tr>
@@ -654,6 +683,37 @@
       </table>
     </div>
   </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       PANNELLO STREAMING LLM (modale flottante)
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="llm-stream-panel" style="display:none;position:fixed;bottom:1.5rem;right:1.5rem;
+    width:min(520px,92vw);background:#0c1829;border:1px solid #2d4a6b;border-radius:12px;
+    box-shadow:0 8px 32px #000a;z-index:200;padding:1.25rem 1.5rem;font-size:0.85rem;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.8rem">
+      <span style="color:#38bdf8;font-weight:700">&#129504; LLM Streaming</span>
+      <div style="display:flex;gap:.5rem;align-items:center">
+        <span id="llm-status" style="font-size:.75rem;color:#64748b"></span>
+        <button onclick="closeLlmPanel()" style="background:none;border:none;color:#64748b;
+          cursor:pointer;font-size:1.1rem;line-height:1;padding:.1rem .3rem"
+          title="Chiudi">&#10005;</button>
+      </div>
+    </div>
+    <pre id="llm-stream-output" style="background:#0f172a;border:1px solid #334155;
+      border-radius:8px;padding:.8rem 1rem;font-family:'Fira Code',monospace;font-size:.78rem;
+      color:#a5f3fc;white-space:pre-wrap;word-break:break-word;max-height:280px;
+      overflow-y:auto;min-height:60px;line-height:1.5"></pre>
+    <div style="margin-top:.7rem;display:flex;gap:.6rem">
+      <button id="llm-copy-btn" onclick="copyLlmOutput()" style="background:#1e293b;
+        border:1px solid #334155;color:#94a3b8;padding:.3rem .8rem;border-radius:6px;
+        cursor:pointer;font-size:.78rem" title="Copia codice">&#128203; Copia</button>
+      <span id="llm-cursor" style="color:#38bdf8;font-weight:700;animation:blink 1s step-end infinite">&#9646;</span>
+    </div>
+  </div>
+
+  <style>
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+  </style>
 
 </div><!-- /container -->
 
@@ -765,6 +825,104 @@ function filterTable() {
 
   pre.innerHTML = html;
 })();
+
+/* ── LLM STREAMING ── */
+let _llmEventSource = null;
+
+function streamLlm(btn) {
+  const sasCode = btn.getAttribute('data-sas');
+  const cat     = btn.getAttribute('data-cat') || '';
+  const panel   = document.getElementById('llm-stream-panel');
+  const output  = document.getElementById('llm-stream-output');
+  const status  = document.getElementById('llm-status');
+  const cursor  = document.getElementById('llm-cursor');
+
+  // Chiudi eventuale stream precedente
+  if (_llmEventSource) { _llmEventSource.close(); _llmEventSource = null; }
+
+  // Mostra pannello e reset
+  panel.style.display = 'block';
+  output.textContent  = '';
+  cursor.style.display = 'inline';
+  status.textContent  = '● in corso…';
+  status.style.color  = '#38bdf8';
+
+  // Invia la richiesta al server come POST con fetch e legge lo stream
+  let accum = '';
+  fetch('/stream_llm', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'sas_code=' + encodeURIComponent(sasCode) + '&block_category=' + encodeURIComponent(cat),
+  }).then(resp => {
+    if (!resp.ok) {
+      output.textContent = '# Errore: ' + resp.status;
+      status.textContent = 'errore';
+      status.style.color = '#f87171';
+      cursor.style.display = 'none';
+      return;
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    function pump() {
+      reader.read().then(({done, value}) => {
+        if (done) {
+          cursor.style.display = 'none';
+          status.textContent = '✓ completato';
+          status.style.color = '#4ade80';
+          return;
+        }
+        buf += decoder.decode(value, {stream: true});
+        // Processa le righe SSE nel buffer
+        const lines = buf.split('\n');
+        buf = lines.pop(); // l'ultima riga potrebbe essere incompleta
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const obj = JSON.parse(line.slice(6));
+            if (obj.done) {
+              cursor.style.display = 'none';
+              status.textContent = '✓ completato';
+              status.style.color = '#4ade80';
+              return;
+            }
+            if (obj.token) {
+              accum += obj.token;
+              output.textContent = accum;
+              output.scrollTop = output.scrollHeight;
+            }
+          } catch(e) {}
+        }
+        pump();
+      }).catch(err => {
+        cursor.style.display = 'none';
+        status.textContent = 'interrotto';
+        status.style.color = '#f87171';
+      });
+    }
+    pump();
+  }).catch(err => {
+    output.textContent = '# Errore di rete: ' + err.message;
+    cursor.style.display = 'none';
+    status.textContent = 'errore';
+    status.style.color = '#f87171';
+  });
+}
+
+function closeLlmPanel() {
+  if (_llmEventSource) { _llmEventSource.close(); _llmEventSource = null; }
+  document.getElementById('llm-stream-panel').style.display = 'none';
+}
+
+function copyLlmOutput() {
+  const text = document.getElementById('llm-stream-output').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('llm-copy-btn');
+    btn.textContent = '✓ Copiato!';
+    setTimeout(() => { btn.textContent = '📋 Copia'; }, 2000);
+  });
+}
 </script>
 
 </body>
