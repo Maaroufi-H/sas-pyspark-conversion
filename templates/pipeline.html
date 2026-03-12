@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Come funziona — SAS → PySpark Converter</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%);
+      border-bottom: 1px solid #2d4a6b;
+      padding: 1.5rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    .brand { font-size: 1.1rem; font-weight: 700; color: #38bdf8; letter-spacing: -0.3px; }
+    nav a {
+      color: #94a3b8;
+      text-decoration: none;
+      font-size: 0.88rem;
+      margin-left: 1.5rem;
+      transition: color .15s;
+    }
+    nav a:hover { color: #e2e8f0; }
+    nav a.active { color: #38bdf8; }
+
+    /* ── HERO ── */
+    .hero {
+      background: linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%);
+      border-bottom: 1px solid #2d4a6b;
+      padding: 2.5rem 2rem 2rem;
+      text-align: center;
+    }
+    .hero h1 { font-size: 1.9rem; font-weight: 700; color: #f8fafc; }
+    .hero h1 span { color: #38bdf8; }
+    .hero p  { margin-top: .6rem; color: #94a3b8; font-size: .95rem; }
+
+    /* ── LAYOUT ── */
+    main {
+      flex: 1;
+      max-width: 960px;
+      width: 100%;
+      margin: 2rem auto;
+      padding: 0 1.5rem;
+    }
+
+    /* ── SEZIONE ── */
+    .section {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 1.75rem 2rem;
+      margin-bottom: 1.75rem;
+    }
+    .section h2 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 1.1rem;
+      display: flex;
+      align-items: center;
+      gap: .6rem;
+    }
+    .section p  { color: #94a3b8; line-height: 1.65; margin-bottom: .75rem; }
+    .section p:last-child { margin-bottom: 0; }
+
+    /* ── PIPELINE CASCADE ── */
+    .pipeline {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      margin: 1rem 0;
+    }
+    .pipe-box {
+      width: 100%;
+      max-width: 560px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 1rem 1.4rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .pipe-box.input  { border-color: #38bdf8; background: #0c1e30; }
+    .pipe-box.output { border-color: #4ade80; background: #0a1f12; }
+    .pipe-box.l0     { border-color: #a78bfa; background: #130e24; }
+    .pipe-box.l1     { border-color: #38bdf8; background: #0c1e30; }
+    .pipe-box.l2     { border-color: #fb923c; background: #1f1008; }
+    .pipe-icon { font-size: 1.6rem; flex-shrink: 0; line-height: 1; }
+    .pipe-content { flex: 1; }
+    .pipe-label {
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: #64748b;
+      margin-bottom: .2rem;
+    }
+    .pipe-title { font-size: .95rem; font-weight: 600; color: #e2e8f0; }
+    .pipe-sub   { font-size: .8rem;  color: #64748b; margin-top: .2rem; }
+    .pipe-arrow {
+      font-size: 1.4rem;
+      color: #334155;
+      line-height: 1;
+      margin: .25rem 0;
+    }
+    .pipe-optional {
+      font-size: .68rem;
+      color: #fb923c;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      background: #1f1008;
+      border: 1px solid #fb923c44;
+      border-radius: 4px;
+      padding: .1rem .4rem;
+      margin-left: .4rem;
+    }
+
+    /* ── LIST ITEMS ── */
+    ul.feature-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: .5rem;
+      margin-top: .6rem;
+    }
+    ul.feature-list li {
+      color: #cbd5e1;
+      font-size: .9rem;
+      display: flex;
+      gap: .6rem;
+      line-height: 1.5;
+    }
+    ul.feature-list li .icon { flex-shrink: 0; }
+
+    /* ── TODO TABLE ── */
+    .todo-list {
+      display: flex;
+      flex-direction: column;
+      gap: .55rem;
+      margin-top: .6rem;
+    }
+    .todo-item {
+      display: flex;
+      align-items: flex-start;
+      gap: .75rem;
+      font-size: .9rem;
+      color: #cbd5e1;
+      line-height: 1.5;
+    }
+    .badge-status {
+      flex-shrink: 0;
+      font-size: .7rem;
+      font-weight: 700;
+      padding: .15rem .5rem;
+      border-radius: 999px;
+      letter-spacing: .04em;
+    }
+    .b-inprogress { background: #422006; color: #fbbf24; border: 1px solid #92400e; }
+    .b-unsupported { background: #3f0006; color: #f87171; border: 1px solid #991b1b; }
+
+    /* ── CODE SNIPPET ── */
+    .code-block {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: .9rem 1.1rem;
+      font-family: "Fira Code", "Cascadia Code", monospace;
+      font-size: .82rem;
+      white-space: pre;
+      overflow-x: auto;
+      margin-top: .75rem;
+      color: #a5f3fc;
+      line-height: 1.55;
+    }
+    .code-block .c  { color: #475569; }  /* commento */
+    .code-block .kw { color: #c084fc; }  /* keyword */
+    .code-block .todo { color: #fbbf24; font-weight: 600; }
+    .code-block .llm  { color: #4ade80; }
+
+    /* ── STATUS BADGE LLM ── */
+    .llm-status {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      font-size: .8rem;
+      padding: .3rem .75rem;
+      border-radius: 999px;
+      font-weight: 600;
+      margin-top: .6rem;
+    }
+    .llm-ok  { background: #052e16; color: #4ade80; border: 1px solid #166534; }
+    .llm-off { background: #3f0006; color: #f87171; border: 1px solid #991b1b; }
+
+    /* ── FOOTER ── */
+    footer {
+      text-align: center;
+      padding: 1.5rem;
+      color: #334155;
+      font-size: .8rem;
+      border-top: 1px solid #1e293b;
+    }
+    footer a { color: #38bdf8; text-decoration: none; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="brand">SAS &#8594; PySpark</span>
+  <nav>
+    <a href="/">&#8592; Nuova conversione</a>
+    <a href="/pipeline" class="active">Come funziona</a>
+    <a href="{{ repo }}" target="_blank">GitHub</a>
+  </nav>
+</header>
+
+<div class="hero">
+  <h1>Come funziona il <span>Convertitore SAS &#8594; PySpark</span></h1>
+  <p>Architettura a 3 livelli: pre-processore macro, motore deterministico, LLM locale come fallback</p>
+</div>
+
+<main>
+
+  <!-- ══════════════════════════════════════════════════════
+       SEZIONE 1 — PANORAMICA ARCHITETTURA
+  ══════════════════════════════════════════════════════ -->
+  <div class="section">
+    <h2>&#127968; Panoramica architettura</h2>
+    <p>La pipeline è composta da tre livelli sequenziali. Ogni livello gestisce la complessità crescente dei costrutti SAS.</p>
+
+    <div class="pipeline">
+      <div class="pipe-box input">
+        <div class="pipe-icon">&#128196;</div>
+        <div class="pipe-content">
+          <div class="pipe-label">Input</div>
+          <div class="pipe-title">Codice SAS sorgente</div>
+          <div class="pipe-sub">File .sas o testo incollato nella UI</div>
+        </div>
+      </div>
+
+      <div class="pipe-arrow">&#8595;</div>
+
+      <div class="pipe-box l0">
+        <div class="pipe-icon">&#9881;&#65039;</div>
+        <div class="pipe-content">
+          <div class="pipe-label">L0 — Opzionale</div>
+          <div class="pipe-title">Pre-processore Macro
+            <span class="pipe-optional">opzionale</span>
+          </div>
+          <div class="pipe-sub">sas_macro_preprocessor.py — espande &amp;var, %let, %do/%to</div>
+        </div>
+      </div>
+
+      <div class="pipe-arrow">&#8595;</div>
+
+      <div class="pipe-box l1">
+        <div class="pipe-icon">&#9889;</div>
+        <div class="pipe-content">
+          <div class="pipe-label">L1 — Deterministico</div>
+          <div class="pipe-title">Parser SAS + Motore di conversione</div>
+          <div class="pipe-sub">trova_sas3_tracker.py + convert_engine.py — regole JSON, nessun LLM</div>
+        </div>
+      </div>
+
+      <div class="pipe-arrow">&#8595;</div>
+
+      <div class="pipe-box l2">
+        <div class="pipe-icon">&#129504;</div>
+        <div class="pipe-content">
+          <div class="pipe-label">L2 — Fallback</div>
+          <div class="pipe-title">LLM Locale — Ollama
+            <span class="pipe-optional">opzionale</span>
+          </div>
+          <div class="pipe-sub">llm_local.py — attivabile manualmente, solo per blocchi non convertiti da L1</div>
+        </div>
+      </div>
+
+      <div class="pipe-arrow">&#8595;</div>
+
+      <div class="pipe-box output">
+        <div class="pipe-icon">&#128200;</div>
+        <div class="pipe-content">
+          <div class="pipe-label">Output</div>
+          <div class="pipe-title">Script PySpark</div>
+          <div class="pipe-sub">Codice Python + commenti # TODO per blocchi non convertiti</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SEZIONE 2 — L0 PRE-PROCESSORE
+  ══════════════════════════════════════════════════════ -->
+  <div class="section">
+    <h2>&#9881;&#65039; L0 — Pre-processore Macro</h2>
+    <p>
+      Il pre-processore risolve staticamente le macro SAS prima che il parser analizzi il codice.
+      Va attivato manualmente con il flag <em>"Pre-processa macro"</em> nella UI.
+    </p>
+    <ul class="feature-list">
+      <li><span class="icon">&#128308;</span> <span>Espansione variabili macro <code>&amp;var</code> con risoluzione singola</span></li>
+      <li><span class="icon">&#128308;</span> <span>Doppia risoluzione <code>&amp;&amp;var</code> → <code>&amp;val</code> → valore finale</span></li>
+      <li><span class="icon">&#128308;</span> <span>Direttive <code>%let nome = valore;</code></span></li>
+      <li><span class="icon">&#128308;</span> <span>Loop <code>%do i = 1 %to &amp;n; ... %end;</code></span></li>
+      <li><span class="icon">&#128308;</span> <span>5 passaggi sequenziali: tokenizzazione, risoluzione, sostituzione, validazione, output</span></li>
+    </ul>
+    <p style="margin-top:.9rem">
+      <strong style="color:#fbbf24">Limitazione attuale:</strong>
+      macro con logica condizionale complessa nel corpo (<code>%if %then</code> annidati)
+      non sono sempre risolvibili staticamente — vengono passate a L1 senza espansione.
+    </p>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SEZIONE 3 — L1 MOTORE DETERMINISTICO
+  ══════════════════════════════════════════════════════ -->
+  <div class="section">
+    <h2>&#9889; L1 — Motore Deterministico</h2>
+    <p>
+      Il cuore del sistema: analizza il SAS in blocchi tipizzati, applica le regole di conversione
+      definite in JSON, e produce codice PySpark senza mai chiamare un LLM.
+    </p>
+    <ul class="feature-list">
+      <li><span class="icon">&#128994;</span> <span><strong>Parser gerarchico</strong>: scompone il SAS in un albero di blocchi con range di righe e profondità</span></li>
+      <li><span class="icon">&#128994;</span> <span><strong>Regole JSON</strong> (<code>regole_classificazione.json</code>): ogni tipo di blocco ha regole di convertibilità e affidabilità</span></li>
+      <li><span class="icon">&#128994;</span> <span><strong>DATA STEP</strong> semplici: <code>SET</code>, <code>WHERE</code>, <code>KEEP</code>, <code>DROP</code>, <code>RENAME</code>, assegnazioni</span></li>
+      <li><span class="icon">&#128994;</span> <span><strong>PROC SQL</strong> base: <code>CREATE TABLE AS SELECT</code>, <code>INSERT INTO</code>, <code>DROP TABLE</code></span></li>
+      <li><span class="icon">&#128994;</span> <span><strong>PROC SORT</strong>: <code>orderBy()</code> con <code>ASC</code>/<code>DESC</code></span></li>
+      <li><span class="icon">&#128994;</span> <span><strong>PROC MEANS / FREQ / PRINT</strong>: aggregazioni e statistiche descrittive</span></li>
+      <li><span class="icon">&#128994;</span> <span><strong>MERGE</strong> semplici: join binario con <code>BY</code></span></li>
+      <li><span class="icon">&#128994;</span> <span><strong>%MACRO / %MEND</strong>: convertite in funzioni Python <code>def macro_nome(...)</code></span></li>
+    </ul>
+    <p style="margin-top:.9rem">
+      I separatori di blocco nell'output usano <code># ══</code> per delimitare visivamente ogni sezione convertita.
+      I blocchi non gestiti emettono un commento <code># TODO: REVISIONE MANUALE NECESSARIA</code>.
+    </p>
+    <div class="code-block"><span class="c"># ══════════════════════════════════════════════════════</span>
+<span class="c"># DATA STEP: output_table [riga 12–28]</span>
+<span class="c"># ══════════════════════════════════════════════════════</span>
+output_table = spark.table(<span style="color:#86efac">"input_table"</span>)\
+    .filter(F.col(<span style="color:#86efac">"amount"</span>) > 0)\
+    .select(<span style="color:#86efac">"id"</span>, <span style="color:#86efac">"amount"</span>, <span style="color:#86efac">"date"</span>)
+
+<span class="todo"># ============================================================</span>
+<span class="todo"># TODO: REVISIONE MANUALE NECESSARIA</span>
+<span class="todo"># Motivo    : RETAIN / FIRST. LAST.: usare Window functions</span>
+<span class="todo"># ============================================================</span></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SEZIONE 4 — L2 LLM LOCALE
+  ══════════════════════════════════════════════════════ -->
+  <div class="section">
+    <h2>&#129504; L2 — LLM Locale (Ollama)</h2>
+    <p>
+      Il livello LLM è un fallback opzionale per i blocchi SAS che il motore deterministico
+      non riesce a convertire. Va attivato manualmente con il flag <em>"Usa LLM"</em>.
+    </p>
+
+    <div>
+      {% if ollama_ok %}
+      <span class="llm-status llm-ok">&#9679; LLM attivo — {{ llm_model }}</span>
+      {% else %}
+      <span class="llm-status llm-off">&#9679; LLM non disponibile — controlla Ollama</span>
+      {% endif %}
+    </div>
+
+    <ul class="feature-list" style="margin-top:.9rem">
+      <li><span class="icon">&#128994;</span> <span>Modello attuale: <strong>{{ llm_model }}</strong> via Ollama su <code>localhost:11434</code></span></li>
+      <li><span class="icon">&#128994;</span> <span>Attivabile per singola richiesta — non obbligatorio</span></li>
+      <li><span class="icon">&#128994;</span> <span>Usato come fallback: L1 tenta prima, L2 interviene solo sui blocchi rimasti <code>TODO</code></span></li>
+      <li><span class="icon">&#128994;</span> <span>Output LLM marcato con <code># [LLM-generated]</code> per distinguerlo dal codice deterministico</span></li>
+      <li><span class="icon">&#128994;</span> <span>Tutti i dati restano on-premise — nessun invio a LLM cloud</span></li>
+    </ul>
+    <p style="margin-top:.9rem">
+      <strong style="color:#fbbf24">Limitazione:</strong>
+      la qualità dipende dalla RAM disponibile e dal modello caricato.
+      Su infrastruttura CPU-only (Azure B2s, 2 vCPU) la velocità è ~7.5 tok/s:
+      ogni blocco SAS impiega ~30s con <code>num_predict=200</code>.
+    </p>
+    <div class="code-block"><span class="llm"># [LLM-generated] righe 15–22 | RETAIN / FIRST. LAST.: usare Window functions</span>
+<span class="kw">from</span> pyspark.sql <span class="kw">import</span> Window
+<span class="kw">from</span> pyspark.sql.functions <span class="kw">import</span> col, sum <span class="kw">as</span> F_sum
+
+window_spec = Window.orderBy(<span style="color:#86efac">"date"</span>)
+running_totals = sales_data.withColumn(
+    <span style="color:#86efac">"cumulative_sales"</span>,
+    F_sum(<span style="color:#86efac">"daily_sales"</span>).over(window_spec)
+)</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SEZIONE 5 — TODO IN SOSPESO
+  ══════════════════════════════════════════════════════ -->
+  <div class="section">
+    <h2>&#128203; Costrutti ancora in sospeso</h2>
+    <p>
+      Alcuni costrutti SAS non hanno ancora una conversione automatica affidabile.
+      Vengono marcati <code># TODO</code> nell'output per revisione manuale.
+    </p>
+
+    <div class="todo-list">
+      <div class="todo-item">
+        <span class="badge-status b-unsupported">Non supportato</span>
+        <span>SQL dinamico con macro SAS nel corpo della query (<code>%if/%then</code>, <code>%do</code> dentro <code>PROC SQL</code>)</span>
+      </div>
+      <div class="todo-item">
+        <span class="badge-status b-unsupported">Non supportato</span>
+        <span><code>CALL EXECUTE</code> e generazione dinamica di codice SAS a runtime</span>
+      </div>
+      <div class="todo-item">
+        <span class="badge-status b-inprogress">In progress</span>
+        <span><code>RETAIN</code> / <code>FIRST.</code> / <code>LAST.</code> — suggerimento Window functions generato, conversione automatica non garantita</span>
+      </div>
+      <div class="todo-item">
+        <span class="badge-status b-inprogress">In progress</span>
+        <span>Macro SAS con parametri multipli e logica condizionale ricorsiva nel corpo</span>
+      </div>
+      <div class="todo-item">
+        <span class="badge-status b-unsupported">Non supportato</span>
+        <span><code>PROC REPORT</code> e <code>PROC TABULATE</code> — output tipografico senza equivalente diretto in PySpark</span>
+      </div>
+      <div class="todo-item">
+        <span class="badge-status b-inprogress">In progress</span>
+        <span><code>PROC FORMAT</code> — formati SAS custom, parzialmente mappati su <code>F.when()</code></span>
+      </div>
+      <div class="todo-item">
+        <span class="badge-status b-unsupported">Non supportato</span>
+        <span>Macro di sistema complesse: <code>%SYSFUNC</code>, <code>%EVAL</code> con espressioni aritmetiche, <code>%SCAN</code>, <code>%INDEX</code></span>
+      </div>
+      <div class="todo-item">
+        <span class="badge-status b-unsupported">Non supportato</span>
+        <span><code>PROC IML</code> — algebra matriciale SAS, nessun equivalente automatico in PySpark</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SEZIONE 6 — OUTPUT E COME LEGGERLO
+  ══════════════════════════════════════════════════════ -->
+  <div class="section">
+    <h2>&#127881; Come leggere l'output generato</h2>
+    <p>
+      Il codice PySpark generato usa un sistema di annotazioni visive per indicare
+      la provenienza e l'affidabilità di ogni blocco convertito.
+    </p>
+    <ul class="feature-list">
+      <li>
+        <span class="icon">&#9899;</span>
+        <span>
+          <strong style="color:#475569"># Commenti grigi</strong> —
+          separatori di blocco <code># ══</code>, intestazioni di sezione.
+          Generati deterministicamente da L1.
+        </span>
+      </li>
+      <li>
+        <span class="icon">&#128993;</span>
+        <span>
+          <strong style="color:#fbbf24"># TODO gialli</strong> —
+          blocchi non convertiti automaticamente. Richiedono revisione manuale.
+          Contengono il codice SAS originale come riferimento.
+        </span>
+      </li>
+      <li>
+        <span class="icon">&#128994;</span>
+        <span>
+          <strong style="color:#4ade80"># [LLM-generated] verdi</strong> —
+          blocchi convertiti dal modello LLM locale. Da verificare: possono contenere
+          nomi di tabelle generici (<code>sales_data</code>) al posto di quelli reali.
+        </span>
+      </li>
+      <li>
+        <span class="icon">&#128308;</span>
+        <span>
+          <strong style="color:#c084fc">Keyword viola</strong> —
+          parole chiave Python (<code>def</code>, <code>return</code>, <code>if</code>, …) evidenziate nel viewer.
+        </span>
+      </li>
+    </ul>
+    <p style="margin-top:.9rem">
+      I blocchi <code># TODO</code> contengono sempre il codice SAS originale nelle righe di commento
+      sottostanti — usalo come riferimento per la riscrittura manuale.
+    </p>
+  </div>
+
+</main>
+
+<footer>
+  SAS &#8594; PySpark Converter v{{ version }} &nbsp;|&nbsp;
+  <a href="{{ repo }}" target="_blank">GitHub</a> &nbsp;|&nbsp;
+  <a href="/">Nuova conversione</a> &nbsp;|&nbsp;
+  <a href="/pipeline">Come funziona</a>
+</footer>
+
+</body>
+</html>

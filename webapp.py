@@ -15,9 +15,11 @@ Route:
     POST /convert   → esegue la conversione, mostra risultati in HTML
     GET  /health    → health check per Azure / load balancer
     GET  /docs/<f>  → documentazione HTML
+    GET  /pipeline  → pagina "Come funziona" con architettura pipeline
 
 Log:
-    logs/converter.log  (rotazione 2 MB × 3 backup)
+    logs/converter.log   (rotazione 2 MB × 3 backup) — eventi applicativi
+    logs/io_requests.log (rotazione 5 MB × 3 backup) — input/output per richiesta
     Seguire in tempo reale:  tail -f logs/converter.log
 """
 from __future__ import annotations
@@ -103,6 +105,24 @@ log = _make_logger("converter.app")
 
 # Logger Ollama (importato anche da llm_local.py tramite getLogger("ollama"))
 ollama_logger = _make_logger("ollama")
+
+# ── Logger I/O dedicato: registra input SAS e output PySpark per richiesta ──
+_io_fmt = logging.Formatter("%(message)s")   # formato libero, già strutturato
+_io_fh  = RotatingFileHandler(
+    _LOG_DIR / "io_requests.log",
+    maxBytes=5_000_000,
+    backupCount=3,
+    encoding="utf-8",
+)
+_io_fh.setFormatter(_io_fmt)
+
+_io_log = logging.getLogger("converter.io")
+_io_log.setLevel(logging.INFO)
+_io_log.propagate = False
+_io_log.addHandler(_io_fh)
+
+# Contatore globale richieste (incrementato ad ogni POST /convert)
+_request_counter = 0
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -247,6 +267,50 @@ def run_conversion(
         tmp_path.unlink(missing_ok=True)
 
 
+def _log_io_request(
+    req_num: int,
+    sas_code: str,
+    pyspark_code: str,
+    use_llm: bool,
+    elapsed_ms: int,
+    block_count: int,
+) -> None:
+    """
+    Scrive una voce leggibile su logs/io_requests.log con input SAS e output PySpark.
+    Tronca a 500 chars con indicazione se il testo è più lungo.
+    Formato:
+        [TIMESTAMP] REQUEST #N | use_llm=X | Xms | X blocks
+        INPUT (X chars):
+          ...codice SAS...
+        OUTPUT (X chars):
+          ...codice PySpark...
+        ---
+    """
+    _TRUNC = 500
+
+    def _trunc(text: str) -> str:
+        if len(text) <= _TRUNC:
+            return text
+        return text[:_TRUNC] + f"\n  ...[truncated — {len(text)} chars total]"
+
+    sas_preview   = "\n".join(f"  {l}" for l in _trunc(sas_code).splitlines())
+    py_preview    = "\n".join(f"  {l}" for l in _trunc(pyspark_code).splitlines())
+
+    import datetime
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    entry = (
+        f"[{ts}] REQUEST #{req_num}"
+        f" | use_llm={use_llm}"
+        f" | {elapsed_ms}ms"
+        f" | {block_count} block{'s' if block_count != 1 else ''}\n"
+        f"INPUT ({len(sas_code)} chars):\n{sas_preview}\n"
+        f"OUTPUT ({len(pyspark_code)} chars):\n{py_preview}\n"
+        f"---"
+    )
+    _io_log.info(entry)
+
+
 def _parse_macro_vars(raw: str) -> Dict[str, str]:
     """
     Converte stringa "nid=3 livAgregg=1 path=/data" → {"nid": "3", ...}
@@ -280,6 +344,10 @@ def index():
 @app.route("/convert", methods=["POST"])
 def convert():
     """Esegue la conversione e mostra i risultati."""
+    global _request_counter
+    _request_counter += 1
+    req_num = _request_counter
+
     sas_code = request.form.get("sas_code", "").strip()
     if not sas_code:
         log.warning("[APP] POST /convert — testo SAS vuoto, redirect a home")
@@ -334,6 +402,16 @@ def convert():
     )
     log.info("[APP] ─────────────────────────────────────────────────────────")
 
+    # Scrivi voce I/O su io_requests.log
+    _log_io_request(
+        req_num=req_num,
+        sas_code=sas_code,
+        pyspark_code=result["pyspark_code"],
+        use_llm=use_llm,
+        elapsed_ms=int(elapsed * 1000),
+        block_count=result["block_count"],
+    )
+
     # Converte DataFrame → liste di dict per Jinja2
     blocks_records = _df_to_records(result["blocks_df"])
     stats_records  = _df_to_records(result["stats_df"])
@@ -375,6 +453,20 @@ def health():
         "version": _VERSION,
         "ollama": _LLM_BACKEND is not None,
     }, 200
+
+
+@app.route("/pipeline", methods=["GET"])
+def pipeline():
+    """Pagina 'Come funziona' — architettura della pipeline di conversione."""
+    log.debug("[APP] GET /pipeline")
+    llm_model = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:0.5b")
+    return render_template(
+        "pipeline.html",
+        version=_VERSION,
+        repo=_REPO,
+        llm_model=llm_model,
+        ollama_ok=_LLM_BACKEND is not None,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════

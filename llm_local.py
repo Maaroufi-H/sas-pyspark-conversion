@@ -82,7 +82,7 @@ class OllamaConverter:
         host: str = "http://localhost:11434",
         learning_db_path: str = "learning_db.jsonl",
         temperature: float = 0.1,   # basse pour reproductibilité
-        num_predict: int = 1024,    # 1024 bilanciato per inference CPU-only
+        num_predict: int = 200,     # 200 token: ~30s su 2vCPU CPU-only con 0.5b (7.5tok/s)
     ):
         self.model     = model
         self.host      = host.rstrip("/")
@@ -133,7 +133,7 @@ class OllamaConverter:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(probe_req, timeout=90) as resp:
+            with urllib.request.urlopen(probe_req, timeout=120) as resp:
                 pass  # successo: il modello è in memoria e risponde
             _log.info(f"[OLLAMA] Probe OK → modello '{self.model}' caricato in memoria")
             return True
