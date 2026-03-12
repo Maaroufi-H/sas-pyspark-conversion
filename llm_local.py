@@ -82,7 +82,7 @@ class OllamaConverter:
         host: str = "http://localhost:11434",
         learning_db_path: str = "learning_db.jsonl",
         temperature: float = 0.1,   # basse pour reproductibilité
-        num_predict: int = 2048,
+        num_predict: int = 1024,    # 1024 bilanciato per inference CPU-only
     ):
         self.model     = model
         self.host      = host.rstrip("/")
@@ -194,7 +194,7 @@ class OllamaConverter:
         )
         t0 = time.perf_counter()
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=300) as resp:
                 result = json.loads(resp.read())
                 response = result.get("response", "").strip()
             elapsed = time.perf_counter() - t0
