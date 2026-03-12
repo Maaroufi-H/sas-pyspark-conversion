@@ -725,7 +725,18 @@ function filterTable() {
   // Salva il testo puro PRIMA di qualsiasi modifica HTML → usato dal copy
   _plainCode = pre.textContent;
 
-  let html = _plainCode
+  // Escape dei caratteri HTML speciali nel testo grezzo:
+  // pre.textContent decodifica &lt; → < e &gt; → >, quindi dobbiamo
+  // re-escaparli prima di inserire tag HTML, altrimenti il browser
+  // interpreta i < > come apertura/chiusura di tag e corrompe il DOM.
+  function _escHtml(s) {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  let html = _escHtml(_plainCode)
     /* TODO lines → giallo */
     .replace(/(^.*# TODO.*$)/gm, '<span class="todo">$1</span>')
     /* commenti # → grigio (non TODO) */

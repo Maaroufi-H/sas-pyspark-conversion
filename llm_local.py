@@ -94,18 +94,62 @@ class OllamaConverter:
     # ── Verifica disponibilità ───────────────────────────────────────
 
     def is_available(self) -> bool:
-        """Verifica che Ollama sia in esecuzione e che il modello sia disponibile."""
-        url = f"{self.host}/api/tags"
-        _log.debug(f"[OLLAMA] Check disponibilità → GET {url}")
+        """
+        Verifica che Ollama sia in esecuzione, che il modello sia presente
+        e che ci sia RAM sufficiente per caricarlo.
+
+        La verifica avviene in due fasi:
+          1. GET /api/tags  → controlla che il modello sia scaricato
+          2. POST /api/generate con num_predict=1 → verifica che il modello
+             si carichi effettivamente (rileva errori di memoria come HTTP 500)
+        """
+        # Fase 1: il modello è nella lista?
+        url_tags = f"{self.host}/api/tags"
+        _log.debug(f"[OLLAMA] Check disponibilità → GET {url_tags}")
         try:
-            with urllib.request.urlopen(url, timeout=3) as resp:
+            with urllib.request.urlopen(url_tags, timeout=3) as resp:
                 data = json.loads(resp.read())
             models = [m["name"] for m in data.get("models", [])]
             found = any(self.model.split(":")[0] in m for m in models)
             _log.info(f"[OLLAMA] Modelli presenti: {models} | '{self.model}' trovato: {found}")
-            return found
+            if not found:
+                return False
         except Exception as e:
-            _log.warning(f"[OLLAMA] Non raggiungibile ({url}): {e}")
+            _log.warning(f"[OLLAMA] Non raggiungibile ({url_tags}): {e}")
+            return False
+
+        # Fase 2: il modello si carica in memoria? (test con 1 token)
+        url_gen = f"{self.host}/api/generate"
+        probe_payload = json.dumps({
+            "model": self.model,
+            "prompt": "hi",
+            "stream": False,
+            "options": {"num_predict": 1},
+        }).encode("utf-8")
+        probe_req = urllib.request.Request(
+            url_gen,
+            data=probe_payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(probe_req, timeout=30) as resp:
+                pass  # successo: il modello è in memoria e risponde
+            _log.info(f"[OLLAMA] Probe OK → modello '{self.model}' caricato in memoria")
+            return True
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            _log.warning(
+                f"[OLLAMA] Probe fallito HTTP {e.code} → modello '{self.model}' "
+                f"non caricabile: {body}"
+            )
+            return False
+        except Exception as e:
+            _log.warning(f"[OLLAMA] Probe fallito: {e}")
             return False
 
     # ── Conversione ─────────────────────────────────────────────────
@@ -159,6 +203,17 @@ class OllamaConverter:
                 f"{len(response)} chars output"
             )
             return response
+        except urllib.error.HTTPError as e:
+            elapsed = time.perf_counter() - t0
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            _log.error(
+                f"[OLLAMA] Errore HTTP {e.code} dopo {elapsed:.1f}s: {body or e.reason}"
+            )
+            return None
         except urllib.error.URLError as e:
             elapsed = time.perf_counter() - t0
             _log.error(f"[OLLAMA] Errore di rete dopo {elapsed:.1f}s: {e}")
