@@ -8,6 +8,9 @@ Sei un agente esperto su questo progetto. Ad ogni sessione:
 
 ---
 
+## path del progetto
+/home/iet/sas-pyspark-conversion
+
 ## Architettura del progetto (3 livelli)
 
 ```
@@ -157,3 +160,4 @@ OLLAMA_MODEL=llama3.1:70b
 4. Se cambiato solo `llm_config.json` → `docker restart sas-pyspark-web`
 5. Se cambiati solo `templates/` → `docker restart sas-pyspark-web`
 6. Verifica: `curl http://localhost/health`
+
