@@ -877,27 +877,22 @@ def _todo_block(blk: dict, ctx: ConversionContext, reason: str) -> str:
 
 # ─── HASH OBJECT ──────────────────────────────────────────────────────
 
-def _extract_hash_dataset(h_opts_raw: str) -> Tuple[Optional[str], bool]:
+def _extract_hash_dataset(h_opts_raw: str) -> Tuple[Optional[str], bool, Optional[str]]:
     """
-    Estrae il nome dataset dalla stringa delle opzioni di declare hash.
+    Estrae il nome dataset e la WHERE inline dalla stringa delle opzioni di declare hash.
     Gestisce dataset con opzioni inline: 'nome(where=(...))'.
-    Ritorna (dataset_name_solo, has_macro) dove:
-      - dataset_name_solo è il nome tabella senza le opzioni inline
-      - has_macro è True se il dataset/where contiene riferimenti % non risolvibili
-    """
-    # Cerca il valore del parametro dataset:
-    # La stringa può contenere parentesi bilanciate all'interno delle virgolette:
-    #   'dati_dw.eventi (where=(%_eg_WhereParam(...)))'
-    # Il regex [^'\"]+ non funziona in quel caso: usiamo un approccio bilanciato.
 
-    # Cerca l'apertura dataset:'   oppure  dataset:"
+    Ritorna (dataset_name, has_macro, inline_where) dove:
+      - dataset_name è il nome tabella senza le opzioni inline
+      - has_macro è True se il dataset/where contiene riferimenti % non risolvibili
+      - inline_where è la WHERE clause estratta da dataset:'nome(where=(...))', o None
+    """
     dm = re.search(r"dataset\s*:\s*(['\"])", h_opts_raw, re.I)
     if not dm:
-        return None, False
+        return None, False, None
 
     quote_char = dm.group(1)
     start = dm.end()
-    # Trova la chiusura della stringa (stessa virgoletta)
     end = h_opts_raw.find(quote_char, start)
     if end == -1:
         ds_raw = h_opts_raw[start:]
@@ -907,41 +902,75 @@ def _extract_hash_dataset(h_opts_raw: str) -> Tuple[Optional[str], bool]:
     # Il nome dataset è tutto prima di '(' o whitespace
     ds_name = re.split(r'[\s(]', ds_raw)[0].strip()
 
-    # Controlla se la parte restante (opzioni inline) contiene macro %
+    # Controlla macro %
     has_macro = bool(re.search(r'%', ds_raw))
 
-    return ds_name if ds_name else None, has_macro
+    # P1: estrai WHERE inline dal dataset string, es. 'TABLE(where=(...))'
+    inline_where: Optional[str] = None
+    wh_m = re.search(r'\bwhere\s*=\s*\(', ds_raw, re.I)
+    if wh_m:
+        wh_start = ds_raw.find('(', wh_m.start())
+        depth2 = 0
+        where_buf = ""
+        for i in range(wh_start, len(ds_raw)):
+            ch = ds_raw[i]
+            if ch == '(':
+                depth2 += 1
+                if depth2 == 1:
+                    continue
+            elif ch == ')':
+                depth2 -= 1
+                if depth2 == 0:
+                    where_buf = ds_raw[wh_start+1:i]
+                    break
+            if depth2 > 0:
+                where_buf += ch
+        if where_buf.strip() and '%' not in where_buf:
+            inline_where = where_buf.strip()
+
+    return ds_name if ds_name else None, has_macro, inline_where
 
 
 def _extract_set_where(txt: str) -> Tuple[Optional[str], Optional[str]]:
     """
-    Estrae il dataset sorgente e la WHERE clause dalla riga set principale
-    (quella non sotto if _n_=0 e non sotto if _n_=1).
+    Estrae il dataset sorgente e la WHERE clause dalla riga SET principale.
 
-    Es:  set QUERY_FOR_RECUPERI2(keep=... where=(Data_Contabilizzazione IS MISSING))
-    →  ("QUERY_FOR_RECUPERI2", "Data_Contabilizzazione IS MISSING")
+    P3 fix: prima di cercare, rimuove i blocchi 'if _n_=0 then do; ... end;' e
+    le righe singole 'if _n_=0 then set ...;' in modo da non confondere i SET
+    usati solo per dichiarare tipi/keep con il SET sorgente principale.
 
-    Usa parsing a parentesi bilanciate per gestire WHERE con parentesi annidate.
+    Poi itera su tutti i SET rimanenti: usa il primo con WHERE, altrimenti il
+    primo con opzioni qualunque, altrimenti il primo senza opzioni.
     """
-    # Trova tutti i set statement: usa il primo che ha opzioni (where=)
-    # oppure l'ultimo set senza opzioni come fallback dataset
+    # P3: rimuovi blocchi if _n_=0 then do; ... end;
+    txt_clean = re.sub(
+        r'\bif\s+_n_\s*=\s*0\s+then\s+do\s*;.*?end\s*;',
+        '', txt, flags=re.I | re.S
+    )
+    # P3: rimuovi righe singole if _n_=0 then set ...;
+    txt_clean = re.sub(
+        r'\bif\s+_n_\s*=\s*0\s+then\s+set\s+[^;]+;',
+        '', txt_clean, flags=re.I | re.S
+    )
+    # P3: rimuovi blocchi if _n_=1 then do; ... end; (contengono declare hash)
+    txt_clean = re.sub(
+        r'\bif\s+_[nN]_\s*=\s*1\s+then\s+do\s*;.*?end\s*;',
+        '', txt_clean, flags=re.I | re.S
+    )
+
     fallback_ds = None
-    for m in re.finditer(r'\bset\s+([\w.]+)((?:\s*\([^;]*\))?)\s*;', txt, re.I | re.S):
+    fallback_ds_with_opts = None  # dataset con opzioni ma senza WHERE
+
+    for m in re.finditer(r'\bset\s+([\w.]+)((?:\s*\([^;]*\))?)\s*;', txt_clean, re.I | re.S):
         ds_name = m.group(1).strip()
         opts_raw = m.group(2).strip()
-        if not opts_raw:
-            # SET semplice senza opzioni: salva come fallback e continua
+
+        if not opts_raw or not opts_raw.startswith('('):
             if fallback_ds is None:
                 fallback_ds = ds_name
             continue
 
-        # Estrae il contenuto tra le parentesi esterne
-        if not opts_raw.startswith('('):
-            if fallback_ds is None:
-                fallback_ds = ds_name
-            continue
-
-        # Bilancia parentesi per trovare il contenuto dell'opzione set
+        # Bilancia parentesi per trovare il contenuto completo delle opzioni
         depth = 0
         opts_content = ""
         for i, ch in enumerate(opts_raw):
@@ -960,7 +989,10 @@ def _extract_set_where(txt: str) -> Tuple[Optional[str], Optional[str]]:
         # Cerca where=(...) nel contenuto
         wh_m = re.search(r'\bwhere\s*=\s*\(', opts_content, re.I)
         if not wh_m:
-            return ds_name, None
+            # SET con opzioni (keep/drop/...) ma senza WHERE: salva come fallback
+            if fallback_ds_with_opts is None:
+                fallback_ds_with_opts = ds_name
+            continue
 
         # Estrae il contenuto della WHERE con parentesi bilanciate
         wh_start = opts_content.find('(', wh_m.start())
@@ -980,9 +1012,13 @@ def _extract_set_where(txt: str) -> Tuple[Optional[str], Optional[str]]:
             if depth2 > 0:
                 where_val += ch
 
-        return ds_name, where_val.strip() if where_val.strip() else None
+        if where_val.strip():
+            return ds_name, where_val.strip()
 
-    return fallback_ds, None
+    # Nessun SET con WHERE trovato: restituisce il dataset con opzioni (se c'è)
+    # oppure il fallback senza opzioni
+    best_ds = fallback_ds_with_opts or fallback_ds
+    return best_ds, None
 
 
 def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
@@ -1034,13 +1070,14 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
             if depth > 0:
                 h_opts_raw += ch
 
-        ds_name, has_macro = _extract_hash_dataset(h_opts_raw)
+        ds_name, has_macro, inline_where = _extract_hash_dataset(h_opts_raw)
         multi_m = re.search(r"multidata\s*:\s*['\"]Y['\"]", h_opts_raw, re.I)
 
         hash_defs[h_name] = {
-            "dataset":   ds_name,
-            "has_macro": has_macro,
-            "multidata": bool(multi_m),
+            "dataset":      ds_name,
+            "has_macro":    has_macro,
+            "inline_where": inline_where,   # P1: WHERE inline nel dataset hash
+            "multidata":    bool(multi_m),
             "keys": [],
             "data": [],
         }
@@ -1145,12 +1182,13 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
     join_counter = [0]   # contatore per nominare i join progressivi
 
     for h_name, h_info in hash_defs.items():
-        ds        = h_info["dataset"]
-        has_macro = h_info["has_macro"]
-        keys      = h_info["keys"]        # definekey
-        data      = h_info["data"]
-        multi     = h_info["multidata"]
-        lkp_var   = f"lookup_{h_name.lower()}"
+        ds           = h_info["dataset"]
+        has_macro    = h_info["has_macro"]
+        inline_where = h_info.get("inline_where")   # P1
+        keys         = h_info["keys"]        # definekey
+        data         = h_info["data"]
+        multi        = h_info["multidata"]
+        lkp_var      = f"lookup_{h_name.lower()}"
 
         # FIX 3 + FIX D: dataset hash con macro → TODO esplicito + skeleton join
         if has_macro:
@@ -1181,10 +1219,10 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
                 py_out_ds = f"join{join_counter[0]}"
                 py_out    = py_out_ds
 
-            join_how = "inner" if has_find_next else "left"
+            join_how_macro = "inner" if has_find_next else "left"
             lkp_todo = f"spark.table(\"{ds or 'TODO_DATASET'}\").filter(...)  # TODO: sostituire macro"
 
-            # Chiave di join: usa find_keys se disponibili, altrimenti definekey
+            # P2: estrai find_keys nel ramo has_macro e confronta con definekeys
             _fk_tmp = []
             for fm2 in re.finditer(
                 r'\b' + re.escape(h_name) + r'\s*\.\s*find\s*\(([^)]*)\)',
@@ -1194,25 +1232,48 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
                     _fk_tmp.append(kv2.group(1).strip())
             join_keys = _fk_tmp if _fk_tmp else keys
 
+            # P2: alias mismatch → condizione esplicita con source_df
+            _macro_alias = bool(join_keys) and bool(keys) and (
+                set(k.lower() for k in join_keys) != set(k.lower() for k in keys)
+            )
+
             lines.append(f"{pad}{lkp_var} = {lkp_todo}")
             if src_ds:
                 join_src_macro = f'spark.table("{src_ds}")'
+                src_filter_str = ""
                 if where_raw:
                     sql_where_m = _sas_where_to_spark_sql(where_raw)
                     if '%' not in sql_where_m:
-                        join_src_macro = (
-                            f"(\n{pad}    spark.table(\"{src_ds}\")\n"
-                            f"{pad}    .filter(\"{sql_where_m}\")\n{pad})"
+                        src_filter_str = sql_where_m
+
+                if _macro_alias and len(join_keys) == 1 and len(keys) == 1:
+                    # Condizione esplicita: source_df["find_key"] == lookup["def_key"]
+                    if src_filter_str:
+                        lines.append(
+                            f"{pad}source_df = (\n"
+                            f"{pad}    {join_src_macro}\n"
+                            f"{pad}    .filter(\"{src_filter_str}\")\n"
+                            f"{pad})"
                         )
-                if len(join_keys) == 1:
-                    on_macro = f'on="{join_keys[0]}"'
+                    else:
+                        lines.append(f"{pad}source_df = {join_src_macro}")
+                    cond = f'source_df["{join_keys[0]}"] == {lkp_var}["{keys[0]}"]'
                     lines.append(
-                        f"{pad}{py_out} = {join_src_macro}.join({lkp_var}, {on_macro}, how=\"{join_how}\")"
+                        f"{pad}{py_out} = source_df.join({lkp_var}, {cond}, how=\"{join_how_macro}\")"
                     )
                 else:
-                    on_macro = "on=[" + ", ".join(f'"{k}"' for k in join_keys) + "]"
+                    # Chiave uguale o non rilevabile: usa on=
+                    if src_filter_str:
+                        join_src_macro = (
+                            f"(\n{pad}    spark.table(\"{src_ds}\")\n"
+                            f"{pad}    .filter(\"{src_filter_str}\")\n{pad})"
+                        )
+                    if len(join_keys) == 1:
+                        on_macro = f'on="{join_keys[0]}"'
+                    else:
+                        on_macro = "on=[" + ", ".join(f'"{k}"' for k in join_keys) + "]"
                     lines.append(
-                        f"{pad}{py_out} = {join_src_macro}.join({lkp_var}, {on_macro}, how=\"{join_how}\")"
+                        f"{pad}{py_out} = {join_src_macro}.join({lkp_var}, {on_macro}, how=\"{join_how_macro}\")"
                     )
                 ctx.register_df(py_out_ds, py_out)
             continue
@@ -1223,11 +1284,17 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
 
         # Colonne da selezionare nel lookup (dedup, ordine mantenuto)
         all_cols = list(dict.fromkeys(keys + data))
+        # P1: applica WHERE inline del dataset hash al lookup
+        if inline_where:
+            lkp_where_sql = _sas_where_to_spark_sql(inline_where)
+            lkp_base = f'spark.table("{ds}").filter("{lkp_where_sql}")'
+        else:
+            lkp_base = f'spark.table("{ds}")'
         if all_cols:
             sel_str  = ", ".join(f'"{c}"' for c in all_cols)
-            lkp_expr = f'spark.table("{ds}").select({sel_str})'
+            lkp_expr = f'{lkp_base}.select({sel_str})'
         else:
-            lkp_expr = f'spark.table("{ds}")'
+            lkp_expr = lkp_base
 
         # FIX 2: estrae la chiave passata a T.find(key: col)
         # Se diversa dalla definekey, usa la forma colonna-esplicita
@@ -1286,6 +1353,9 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
         # Sorgente del join: first hash usa src_ds, successivi usano il risultato precedente
         join_src = f'spark.table("{src_ds}")' if src_ds else "source_df"
 
+        # P4: find_next implica righe multiple → inner join più fedele al SAS
+        join_how = "inner" if has_find_next else "left"
+
         # FIX 1: applica WHERE clause dalla riga set(where=(...))
         # filter_suffix è un pezzo intermedio della catena di metodi (senza backslash)
         # la catena completa è racchiusa in () per la continuazione multiriga
@@ -1316,7 +1386,7 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
                         f"{pad}{py_out} = (\n"
                         f"{pad}    {join_src}"
                         f"{filter_suffix}"
-                        f"\n{pad}    .join({lkp_var}, {on_str}, how=\"left\")\n"
+                        f"\n{pad}    .join({lkp_var}, {on_str}, how=\"{join_how}\")\n"
                         f"{pad})"
                     )
                 else:
@@ -1324,7 +1394,7 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
                         f"{pad}{py_out} = (\n"
                         f"{pad}    {join_src}"
                         f"{filter_suffix}"
-                        f"\n{pad}    .join(F.broadcast({lkp_var}), {on_str}, how=\"left\")\n"
+                        f"\n{pad}    .join(F.broadcast({lkp_var}), {on_str}, how=\"{join_how}\")\n"
                         f"{pad})"
                     )
             else:
@@ -1340,12 +1410,12 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
                 if multi or has_find_next:
                     join_line = (
                         f"{src_line}\n"
-                        f"{pad}{py_out} = source_df.join({lkp_var}, {on_str}, how=\"left\")"
+                        f"{pad}{py_out} = source_df.join({lkp_var}, {on_str}, how=\"{join_how}\")"
                     )
                 else:
                     join_line = (
                         f"{src_line}\n"
-                        f"{pad}{py_out} = source_df.join(F.broadcast({lkp_var}), {on_str}, how=\"left\")"
+                        f"{pad}{py_out} = source_df.join(F.broadcast({lkp_var}), {on_str}, how=\"{join_how}\")"
                     )
             lines.append(join_line)
             ctx.register_df(py_out_ds, py_out)
