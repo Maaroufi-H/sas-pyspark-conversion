@@ -1090,9 +1090,11 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
             else:
                 agg_expr = 'F.count("*").alias("count")'
             lines.append(
-                f"{pad}{out_py} = spark.table(\"{agg_src}\")\\\n"
-                f"{pad}    .groupBy({grp_str})\\\n"
-                f"{pad}    .agg({agg_expr})"
+                f"{pad}{out_py} = (\n"
+                f"{pad}    spark.table(\"{agg_src}\")\n"
+                f"{pad}    .groupBy({grp_str})\n"
+                f"{pad}    .agg({agg_expr})\n"
+                f"{pad})"
             )
             lines.append(
                 f"{pad}{out_py}.write.mode(\"overwrite\").saveAsTable(\"{out_ds}\")"
@@ -1207,16 +1209,16 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
         join_src = f'spark.table("{src_ds}")' if src_ds else "source_df"
 
         # FIX 1: applica WHERE clause dalla riga set(where=(...))
-        # filter_suffix inizia con \n (già preceduto da \ su join_src)
-        # e termina con \ per consentire la continuazione con .join(...)
+        # filter_suffix è un pezzo intermedio della catena di metodi (senza backslash)
+        # la catena completa è racchiusa in () per la continuazione multiriga
         filter_suffix = ""
         if where_raw:
             sql_where = _sas_where_to_spark_sql(where_raw)
-            # Tronca a 200 char per leggibilità; con filtri complessi aggiunge commento
+            # Tronca a 200 char per leggibilità; con filtri complessi usa triple-quote
             if len(sql_where) > 200:
-                filter_suffix = f'\n{pad}    .filter("""\\n    {sql_where}\\n    """)\\'
+                filter_suffix = f'\n{pad}    .filter("""{sql_where}""")'
             else:
-                filter_suffix = f'\n{pad}    .filter("{sql_where}")\\'
+                filter_suffix = f'\n{pad}    .filter("{sql_where}")'
 
         if multi or has_find_next:
             lines += [
@@ -1233,29 +1235,37 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
             if use_on_keyword:
                 if multi or has_find_next:
                     join_line = (
-                        f"{pad}{py_out} = {join_src}\\"
+                        f"{pad}{py_out} = (\n"
+                        f"{pad}    {join_src}"
                         f"{filter_suffix}"
-                        f"\n{pad}    .join({lkp_var}, {on_str}, how=\"left\")"
+                        f"\n{pad}    .join({lkp_var}, {on_str}, how=\"left\")\n"
+                        f"{pad})"
                     )
                 else:
                     join_line = (
-                        f"{pad}{py_out} = {join_src}\\"
+                        f"{pad}{py_out} = (\n"
+                        f"{pad}    {join_src}"
                         f"{filter_suffix}"
-                        f"\n{pad}    .join(F.broadcast({lkp_var}), {on_str}, how=\"left\")"
+                        f"\n{pad}    .join(F.broadcast({lkp_var}), {on_str}, how=\"left\")\n"
+                        f"{pad})"
                     )
             else:
                 # Alias join con condizione esplicita
                 if multi or has_find_next:
                     join_line = (
-                        f"{pad}{py_out} = {join_src}\\"
+                        f"{pad}{py_out} = (\n"
+                        f"{pad}    {join_src}"
                         f"{filter_suffix}"
-                        f"\n{pad}    .join({lkp_var}, {on_str}, how=\"left\")"
+                        f"\n{pad}    .join({lkp_var}, {on_str}, how=\"left\")\n"
+                        f"{pad})"
                     )
                 else:
                     join_line = (
-                        f"{pad}{py_out} = {join_src}\\"
+                        f"{pad}{py_out} = (\n"
+                        f"{pad}    {join_src}"
                         f"{filter_suffix}"
-                        f"\n{pad}    .join(F.broadcast({lkp_var}), {on_str}, how=\"left\")"
+                        f"\n{pad}    .join(F.broadcast({lkp_var}), {on_str}, how=\"left\")\n"
+                        f"{pad})"
                     )
             lines.append(join_line)
             ctx.register_df(py_out_ds, py_out)
