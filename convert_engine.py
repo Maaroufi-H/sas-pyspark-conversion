@@ -1200,14 +1200,16 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
         join_src = f'spark.table("{src_ds}")' if src_ds else "source_df"
 
         # FIX 1: applica WHERE clause dalla riga set(where=(...))
+        # filter_suffix inizia con \n (già preceduto da \ su join_src)
+        # e termina con \ per consentire la continuazione con .join(...)
         filter_suffix = ""
         if where_raw:
             sql_where = _sas_where_to_spark_sql(where_raw)
             # Tronca a 200 char per leggibilità; con filtri complessi aggiunge commento
             if len(sql_where) > 200:
-                filter_suffix = f'\n{pad}    .filter("""\\n    {sql_where}\\n    """)'
+                filter_suffix = f'\n{pad}    .filter("""\\n    {sql_where}\\n    """)\\'
             else:
-                filter_suffix = f'\n{pad}    .filter("{sql_where}")'
+                filter_suffix = f'\n{pad}    .filter("{sql_where}")\\'
 
         if multi or has_find_next:
             lines += [
@@ -1224,13 +1226,13 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
             if use_on_keyword:
                 if multi or has_find_next:
                     join_line = (
-                        f"{pad}{py_out} = {join_src}"
+                        f"{pad}{py_out} = {join_src}\\"
                         f"{filter_suffix}"
                         f"\n{pad}    .join({lkp_var}, {on_str}, how=\"left\")"
                     )
                 else:
                     join_line = (
-                        f"{pad}{py_out} = {join_src}"
+                        f"{pad}{py_out} = {join_src}\\"
                         f"{filter_suffix}"
                         f"\n{pad}    .join(F.broadcast({lkp_var}), {on_str}, how=\"left\")"
                     )
@@ -1238,13 +1240,13 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
                 # Alias join con condizione esplicita
                 if multi or has_find_next:
                     join_line = (
-                        f"{pad}{py_out} = {join_src}"
+                        f"{pad}{py_out} = {join_src}\\"
                         f"{filter_suffix}"
                         f"\n{pad}    .join({lkp_var}, {on_str}, how=\"left\")"
                     )
                 else:
                     join_line = (
-                        f"{pad}{py_out} = {join_src}"
+                        f"{pad}{py_out} = {join_src}\\"
                         f"{filter_suffix}"
                         f"\n{pad}    .join(F.broadcast({lkp_var}), {on_str}, how=\"left\")"
                     )
