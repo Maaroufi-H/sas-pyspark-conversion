@@ -1152,10 +1152,9 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
         multi     = h_info["multidata"]
         lkp_var   = f"lookup_{h_name.lower()}"
 
-        # FIX 3: dataset hash con macro non risolvibili → TODO esplicito
+        # FIX 3 + FIX D: dataset hash con macro → TODO esplicito + skeleton join
         if has_macro:
             macro_snippet = ""
-            # Estrae la parte %... dal dataset raw per il messaggio
             ds_full_m = re.search(
                 r"dataset\s*:\s*['\"]([^'\"]*%[^'\"]*)['\"]", txt, re.I | re.S
             )
@@ -1171,9 +1170,51 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
                 f"{pad}#             equivalente, poi ri-convertire il blocco.",
                 f"{pad}# Righe     : {blk.get('linea_start')} – {blk.get('linea_stop')}",
                 f"{pad}# {'=' * 60}",
-                f"{pad}# {lkp_var} = spark.table(\"{ds or 'TODO_DATASET'}\")"
-                f".filter(...)  # completare manualmente",
             ]
+            # FIX D: genera lo skeleton del join anche quando il dataset ha macro
+            # Il lookup viene lasciato come TODO da completare manualmente
+            join_counter[0] += 1
+            if out_names_all:
+                py_out_ds = out_names_all[0]
+                py_out    = _sas_to_py_var(py_out_ds)
+            else:
+                py_out_ds = f"join{join_counter[0]}"
+                py_out    = py_out_ds
+
+            join_how = "inner" if has_find_next else "left"
+            lkp_todo = f"spark.table(\"{ds or 'TODO_DATASET'}\").filter(...)  # TODO: sostituire macro"
+
+            # Chiave di join: usa find_keys se disponibili, altrimenti definekey
+            _fk_tmp = []
+            for fm2 in re.finditer(
+                r'\b' + re.escape(h_name) + r'\s*\.\s*find\s*\(([^)]*)\)',
+                txt, re.I | re.S
+            ):
+                for kv2 in re.finditer(r'\bkey\s*:\s*(\w+)', fm2.group(1), re.I):
+                    _fk_tmp.append(kv2.group(1).strip())
+            join_keys = _fk_tmp if _fk_tmp else keys
+
+            lines.append(f"{pad}{lkp_var} = {lkp_todo}")
+            if src_ds:
+                join_src_macro = f'spark.table("{src_ds}")'
+                if where_raw:
+                    sql_where_m = _sas_where_to_spark_sql(where_raw)
+                    if '%' not in sql_where_m:
+                        join_src_macro = (
+                            f"(\n{pad}    spark.table(\"{src_ds}\")\n"
+                            f"{pad}    .filter(\"{sql_where_m}\")\n{pad})"
+                        )
+                if len(join_keys) == 1:
+                    on_macro = f'on="{join_keys[0]}"'
+                    lines.append(
+                        f"{pad}{py_out} = {join_src_macro}.join({lkp_var}, {on_macro}, how=\"{join_how}\")"
+                    )
+                else:
+                    on_macro = "on=[" + ", ".join(f'"{k}"' for k in join_keys) + "]"
+                    lines.append(
+                        f"{pad}{py_out} = {join_src_macro}.join({lkp_var}, {on_macro}, how=\"{join_how}\")"
+                    )
+                ctx.register_df(py_out_ds, py_out)
             continue
 
         if not ds:
