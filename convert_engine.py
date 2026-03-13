@@ -1338,7 +1338,7 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
             continue
         col_assignments.append((var, expr))
 
-    if col_assignments:
+    if col_assignments and join_counter[0] > 0:
         # Determina la variabile PySpark corrente su cui aggiungere withColumn
         # È l'ultima py_out registrata nel ciclo hash (o src_py se nessun join)
         wc_target = py_out if 'py_out' in dir() else src_py
@@ -1358,10 +1358,12 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
                 )
 
     # ── FIX C: drop col1 col2; → .drop("col1", "col2") ──────────────
+    # Solo se almeno un join è stato generato (join_counter[0] > 0)
     drop_cols = []
-    for dm in re.finditer(r'\bdrop\s+([\w\s]+)\s*;', txt, re.I):
-        cols_raw = dm.group(1).strip()
-        drop_cols.extend(c.strip() for c in cols_raw.split() if c.strip())
+    if join_counter[0] > 0:
+        for dm in re.finditer(r'\bdrop\s+([\w\s]+)\s*;', txt, re.I):
+            cols_raw = dm.group(1).strip()
+            drop_cols.extend(c.strip() for c in cols_raw.split() if c.strip())
     if drop_cols:
         drop_target = py_out if 'py_out' in dir() else src_py
         cols_str = ", ".join(f'"{c}"' for c in drop_cols)
