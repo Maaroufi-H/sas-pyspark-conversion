@@ -1357,6 +1357,16 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
                     f'{pad}{wc_target} = {wc_target}.withColumn("{var}", F.expr("{py_expr}"))'
                 )
 
+    # ── FIX C: drop col1 col2; → .drop("col1", "col2") ──────────────
+    drop_cols = []
+    for dm in re.finditer(r'\bdrop\s+([\w\s]+)\s*;', txt, re.I):
+        cols_raw = dm.group(1).strip()
+        drop_cols.extend(c.strip() for c in cols_raw.split() if c.strip())
+    if drop_cols:
+        drop_target = py_out if 'py_out' in dir() else src_py
+        cols_str = ", ".join(f'"{c}"' for c in drop_cols)
+        lines.append(f"{pad}{drop_target} = {drop_target}.drop({cols_str})")
+
     # ── call missing → commento ──────────────────────────────────────
     if re.search(r'\bcall\s+missing\s*\(', txt, re.I):
         lines.append(
