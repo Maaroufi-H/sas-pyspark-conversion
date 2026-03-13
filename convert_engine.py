@@ -236,6 +236,106 @@ def _sas_type_to_spark(sas_type: str) -> str:
     return "StringType()"  # fallback
 
 
+def _sas_where_to_spark_sql(where_clause: str) -> str:
+    """
+    Traduce una WHERE clause SAS estratta da set ds(where=(...)) in SQL
+    compatibile con spark.table("ds").filter("...").
+
+    Traduzioni applicate:
+      IS MISSING          → IS NULL
+      ^=                  → !=
+      '1Jan2018:0:0:0'dt  → '2018-01-01'  (datetime SAS → ISO date)
+      '01Jan2018:0:0:0'dt → '2018-01-01'
+      NOT IN / IN         → invariato (PySpark SQL accetta)
+      AND / OR            → invariato
+    """
+    w = where_clause.strip()
+
+    # IS MISSING → IS NULL
+    w = re.sub(r'\bIS\s+MISSING\b', 'IS NULL', w, flags=re.I)
+    w = re.sub(r'\bIS\s+NOT\s+MISSING\b', 'IS NOT NULL', w, flags=re.I)
+
+    # ^= → !=
+    w = w.replace('^=', '!=')
+
+    # Datetime literals SAS: '1Jan2018:0:0:0'dt  oppure  '01JAN2018:00:00:00'dt
+    _MONTH_MAP = {
+        'jan':'01','feb':'02','mar':'03','apr':'04','may':'05','jun':'06',
+        'jul':'07','aug':'08','sep':'09','oct':'10','nov':'11','dec':'12',
+    }
+    def _sas_dt_to_iso(m: re.Match) -> str:
+        raw = m.group(1)  # es. "1Jan2018:0:0:0"
+        dm = re.match(r'(\d{1,2})([A-Za-z]{3})(\d{4})', raw)
+        if dm:
+            day   = dm.group(1).zfill(2)
+            month = _MONTH_MAP.get(dm.group(2).lower(), dm.group(2))
+            year  = dm.group(3)
+            return f"'{year}-{month}-{day}'"
+        return m.group(0)  # invariato se non parsabile
+    w = re.sub(r"'([^']+)'dt", _sas_dt_to_iso, w, flags=re.I)
+
+    return w
+
+
+def _sas_date_expr_to_spark(var: str, expr: str, pad: str) -> Optional[str]:
+    """
+    Converte le espressioni di colonna SAS con funzioni date comuni
+    in chiamate F.* PySpark restituendo una riga withColumn.
+
+    Casi gestiti:
+      year(col)*100 + month(col)              → (F.year("col")*100 + F.month("col"))
+      year(datepart(col))*100+month(datepart(col)) → stesso con F.to_date(F.col("col"))
+      year(col)                               → F.year("col")
+      month(col)                              → F.month("col")
+      datepart(col)                           → F.to_date(F.col("col"))
+      input(col, fmt) già gestito da _sas_expr_to_py
+
+    Restituisce la riga Python .withColumn(...) o None se non riconosce il pattern.
+    """
+    e = expr.strip()
+
+    # Normalizza spazi
+    e_norm = re.sub(r'\s+', ' ', e)
+
+    # Helper: col → F.year/F.month con eventuale datepart annidato
+    def _date_fn(fn: str, col_inner: str) -> str:
+        dp = re.match(r'datepart\s*\(\s*(\w+)\s*\)', col_inner, re.I)
+        if dp:
+            col_name = dp.group(1)
+            return f'F.{fn}(F.to_date(F.col("{col_name}")))'
+        col_name = col_inner.strip()
+        return f'F.{fn}("{col_name}")'
+
+    # Pattern: year(X)*100 + month(X) oppure year(X)*100+month(X)
+    m = re.match(
+        r'year\s*\(([^)]+)\)\s*\*\s*100\s*\+\s*month\s*\(([^)]+)\)',
+        e_norm, re.I
+    )
+    if m:
+        yr_part  = _date_fn('year',  m.group(1).strip())
+        mo_part  = _date_fn('month', m.group(2).strip())
+        spark_expr = f'{yr_part}*100 + {mo_part}'
+        return f'{pad}.withColumn("{var}", {spark_expr})'
+
+    # Pattern: year(X)
+    m = re.match(r'year\s*\(([^)]+)\)$', e_norm, re.I)
+    if m:
+        return f'{pad}.withColumn("{var}", {_date_fn("year", m.group(1).strip())})'
+
+    # Pattern: month(X)
+    m = re.match(r'month\s*\(([^)]+)\)$', e_norm, re.I)
+    if m:
+        return f'{pad}.withColumn("{var}", {_date_fn("month", m.group(1).strip())})'
+
+    # Pattern: datepart(X)
+    m = re.match(r'datepart\s*\(([^)]+)\)$', e_norm, re.I)
+    if m:
+        col_name = m.group(1).strip()
+        return f'{pad}.withColumn("{var}", F.to_date(F.col("{col_name}")))'
+
+    return None
+
+
 def _sas_expr_to_py(expr: str, ctx: ConversionContext) -> str:
     """
     Conversione di base di un'espressione SAS → espressione Python.
@@ -743,6 +843,107 @@ def _todo_block(blk: dict, ctx: ConversionContext, reason: str) -> str:
 
 # ─── HASH OBJECT ──────────────────────────────────────────────────────
 
+def _extract_hash_dataset(h_opts_raw: str) -> Tuple[Optional[str], bool]:
+    """
+    Estrae il nome dataset dalla stringa delle opzioni di declare hash.
+    Gestisce dataset con opzioni inline: 'nome(where=(...))'.
+    Ritorna (dataset_name_solo, has_macro) dove:
+      - dataset_name_solo è il nome tabella senza le opzioni inline
+      - has_macro è True se il dataset/where contiene riferimenti % non risolvibili
+    """
+    # Cerca il valore del parametro dataset:
+    # La stringa può contenere parentesi bilanciate all'interno delle virgolette:
+    #   'dati_dw.eventi (where=(%_eg_WhereParam(...)))'
+    # Il regex [^'\"]+ non funziona in quel caso: usiamo un approccio bilanciato.
+
+    # Cerca l'apertura dataset:'   oppure  dataset:"
+    dm = re.search(r"dataset\s*:\s*(['\"])", h_opts_raw, re.I)
+    if not dm:
+        return None, False
+
+    quote_char = dm.group(1)
+    start = dm.end()
+    # Trova la chiusura della stringa (stessa virgoletta)
+    end = h_opts_raw.find(quote_char, start)
+    if end == -1:
+        ds_raw = h_opts_raw[start:]
+    else:
+        ds_raw = h_opts_raw[start:end]
+
+    # Il nome dataset è tutto prima di '(' o whitespace
+    ds_name = re.split(r'[\s(]', ds_raw)[0].strip()
+
+    # Controlla se la parte restante (opzioni inline) contiene macro %
+    has_macro = bool(re.search(r'%', ds_raw))
+
+    return ds_name if ds_name else None, has_macro
+
+
+def _extract_set_where(txt: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Estrae il dataset sorgente e la WHERE clause dalla riga set principale
+    (quella non sotto if _n_=0 e non sotto if _n_=1).
+
+    Es:  set QUERY_FOR_RECUPERI2(keep=... where=(Data_Contabilizzazione IS MISSING))
+    →  ("QUERY_FOR_RECUPERI2", "Data_Contabilizzazione IS MISSING")
+
+    Usa parsing a parentesi bilanciate per gestire WHERE con parentesi annidate.
+    """
+    # Trova tutti i set statement
+    for m in re.finditer(r'\bset\s+([\w.]+)((?:\s*\([^;]*\))?)\s*;', txt, re.I | re.S):
+        ds_name = m.group(1).strip()
+        opts_raw = m.group(2).strip()
+        if not opts_raw:
+            return ds_name, None
+
+        # Estrae il contenuto tra le parentesi esterne
+        if not opts_raw.startswith('('):
+            return ds_name, None
+
+        # Bilancia parentesi per trovare il contenuto dell'opzione set
+        depth = 0
+        opts_content = ""
+        for i, ch in enumerate(opts_raw):
+            if ch == '(':
+                depth += 1
+                if depth == 1:
+                    continue
+            elif ch == ')':
+                depth -= 1
+                if depth == 0:
+                    opts_content = opts_raw[1:i]
+                    break
+            if depth > 0:
+                opts_content += ch
+
+        # Cerca where=(...) nel contenuto
+        wh_m = re.search(r'\bwhere\s*=\s*\(', opts_content, re.I)
+        if not wh_m:
+            return ds_name, None
+
+        # Estrae il contenuto della WHERE con parentesi bilanciate
+        wh_start = opts_content.find('(', wh_m.start())
+        depth2 = 0
+        where_val = ""
+        for i in range(wh_start, len(opts_content)):
+            ch = opts_content[i]
+            if ch == '(':
+                depth2 += 1
+                if depth2 == 1:
+                    continue
+            elif ch == ')':
+                depth2 -= 1
+                if depth2 == 0:
+                    where_val = opts_content[wh_start+1:i]
+                    break
+            if depth2 > 0:
+                where_val += ch
+
+        return ds_name, where_val.strip() if where_val.strip() else None
+
+    return None, None
+
+
 def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
     """
     Converte un DATA step con declare hash in PySpark.
@@ -755,8 +956,11 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
       3. Aggregazione     : data _null_ + T.replace() + T.output()
          → groupBy().agg() + write
 
-    Estrae automaticamente: nome hash, dataset sorgente, chiavi,
-    colonne data, output dataset.
+    FIX applicati:
+      - FIX 1: WHERE clause dal set → .filter() con traduzione IS MISSING→NULL
+      - FIX 2: join key alias (find(key:X) diversa da definekey('Y'))
+      - FIX 3: TODO esplicito quando dataset hash contiene macro % non risolvibili
+      - FIX 5: aggregazione usa la colonna accumulata (X + col) non SUM_of_X
     """
     pad  = ctx.pad
     txt  = blk.get("testo", "")
@@ -765,19 +969,36 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
         f" [riga {blk.get('linea_start')}–{blk.get('linea_stop')}] ──"
     ]
 
-    # ── Trova tutti i blocchi declare hash ──────────────────────────
-    # declare hash T(hashexp:N, dataset:'lib.nome', multidata:'Y');
+    # ── Trova tutti i blocchi declare hash con parentesi bilanciate ──
+    # Il dataset può contenere opzioni inline con parentesi:
+    #   declare hash T(hashexp:7, dataset:'nome(where=(...))', multidata:'Y');
     hash_defs = {}
-    for m in re.finditer(
-        r'\bdeclare\s+hash\s+(\w+)\s*\(([^)]*)\)\s*;',
-        txt, re.I | re.S
-    ):
-        h_name = m.group(1)
-        h_opts = m.group(2)
-        ds_m = re.search(r"dataset\s*:\s*['\"]([^'\"]+)['\"]", h_opts, re.I)
-        multi_m = re.search(r"multidata\s*:\s*['\"]Y['\"]", h_opts, re.I)
+    # Itera sulle dichiarazioni: cerca "declare hash NAME(" poi bilancia le ()
+    for dm in re.finditer(r'\bdeclare\s+hash\s+(\w+)\s*\(', txt, re.I | re.S):
+        h_name = dm.group(1)
+        paren_start = dm.end() - 1   # posizione della '(' di apertura
+        depth = 0
+        h_opts_raw = ""
+        for i in range(paren_start, len(txt)):
+            ch = txt[i]
+            if ch == '(':
+                depth += 1
+                if depth == 1:
+                    continue
+            elif ch == ')':
+                depth -= 1
+                if depth == 0:
+                    h_opts_raw = txt[paren_start+1:i]
+                    break
+            if depth > 0:
+                h_opts_raw += ch
+
+        ds_name, has_macro = _extract_hash_dataset(h_opts_raw)
+        multi_m = re.search(r"multidata\s*:\s*['\"]Y['\"]", h_opts_raw, re.I)
+
         hash_defs[h_name] = {
-            "dataset": ds_m.group(1) if ds_m else None,
+            "dataset":   ds_name,
+            "has_macro": has_macro,
             "multidata": bool(multi_m),
             "keys": [],
             "data": [],
@@ -798,9 +1019,8 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
             cols = [c.strip().strip("'\"") for c in m.group(1).split(',')]
             hash_defs[h_name]["data"].extend(cols)
 
-    # ── Determina il SET sorgente principale ────────────────────────
-    set_m = re.search(r'\bset\s+([\w.]+)\s*;', txt, re.I)
-    src_ds = set_m.group(1) if set_m else None
+    # ── Determina il SET sorgente principale + WHERE clause ──────────
+    src_ds, where_raw = _extract_set_where(txt)
     src_py = _sas_to_py_var(src_ds) if src_ds else "source_df"
 
     # ── Riconosce il sottocaso ───────────────────────────────────────
@@ -811,35 +1031,61 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
 
     # ── Caso 3: aggregazione (data _null_ + replace + output) ───────
     if is_null_data and (has_replace or has_output):
-        # Determina output dataset
         out_m = re.search(
             r'\.output\s*\(\s*dataset\s*:\s*[\'"]([^\'"]+)[\'"]',
             txt, re.I
         )
-        out_ds   = out_m.group(1) if out_m else "hash_output"
-        out_py   = _sas_to_py_var(out_ds)
+        out_ds  = out_m.group(1) if out_m else "hash_output"
+        out_py  = _sas_to_py_var(out_ds)
 
-        # Usa il primo hash definito come riferimento
         first_h  = next(iter(hash_defs.values()), {})
         grp_keys = first_h.get("keys", [])
-        agg_cols = [c for c in first_h.get("data", []) if c not in grp_keys]
 
-        if src_ds:
+        # FIX 5: cerca la colonna effettivamente accumulata nel pattern
+        #   SUM_of_X + col;  →  la colonna da sommare è "col" (2° operando)
+        agg_col = None
+        for m_acc in re.finditer(
+            r'\b(\w+)\s*\+\s*(\w+)\s*;', txt
+        ):
+            lhs = m_acc.group(1)
+            rhs = m_acc.group(2)
+            # Il LHS è la variabile accumulatore (SUM_of_...) il RHS è il valore
+            if re.match(r'sum_of_', lhs, re.I) or lhs.lower().startswith('sum'):
+                agg_col = rhs
+                agg_alias = lhs
+                break
+            # Caso inverso raro: col + accumulatore
+            if re.match(r'sum_of_', rhs, re.I) or rhs.lower().startswith('sum'):
+                agg_col = lhs
+                agg_alias = rhs
+                break
+
+        # Fallback: usa le colonne data non-key
+        if not agg_col:
+            data_cols = first_h.get("data", [])
+            agg_cols_fallback = [c for c in data_cols if c not in grp_keys
+                                 and not re.match(r'sum_of_', c, re.I)]
+            agg_col   = agg_cols_fallback[0] if agg_cols_fallback else None
+            agg_alias = f"SUM_of_{agg_col}" if agg_col else "total"
+
+        # Dataset sorgente per aggregazione: set nel do..until o set esterno
+        agg_src_m = re.search(r'\bset\s+([\w.]+)\s*(?:end\s*=\s*\w+\s*)?;', txt, re.I)
+        agg_src = agg_src_m.group(1) if agg_src_m else src_ds
+
+        if agg_src:
             lines.append(f"{pad}# Hash aggregation → groupBy/agg")
             grp_str = (
                 ", ".join(f'"{k}"' for k in grp_keys)
                 if grp_keys else '"TODO_GROUP_KEY"'
             )
-            if agg_cols:
-                agg_exprs = ", ".join(
-                    f'F.sum("{c}").alias("SUM_of_{c}")' for c in agg_cols
-                )
+            if agg_col:
+                agg_expr = f'F.sum("{agg_col}").alias("{agg_alias}")'
             else:
-                agg_exprs = "F.count(\"*\").alias(\"count\")"
+                agg_expr = 'F.count("*").alias("count")'
             lines.append(
-                f"{pad}{out_py} = spark.table(\"{src_ds}\")\\\n"
+                f"{pad}{out_py} = spark.table(\"{agg_src}\")\\\n"
                 f"{pad}    .groupBy({grp_str})\\\n"
-                f"{pad}    .agg({agg_exprs})"
+                f"{pad}    .agg({agg_expr})"
             )
             lines.append(
                 f"{pad}{out_py}.write.mode(\"overwrite\").saveAsTable(\"{out_ds}\")"
@@ -849,62 +1095,161 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
         ctx.register_df(out_ds, out_py)
         return "\n".join(lines)
 
+    # ── Nomi di output del DATA step ────────────────────────────────
+    out_names_all = re.findall(r'^\s*data\s+(.+?)\s*;', txt, re.I | re.M)
+
     # ── Genera codice per ogni hash definito ─────────────────────────
+    join_counter = [0]   # contatore per nominare i join progressivi
+
     for h_name, h_info in hash_defs.items():
-        ds      = h_info["dataset"]
-        keys    = h_info["keys"]
-        data    = h_info["data"]
-        multi   = h_info["multidata"]
-        lkp_var = f"lookup_{h_name.lower()}"
+        ds        = h_info["dataset"]
+        has_macro = h_info["has_macro"]
+        keys      = h_info["keys"]        # definekey
+        data      = h_info["data"]
+        multi     = h_info["multidata"]
+        lkp_var   = f"lookup_{h_name.lower()}"
+
+        # FIX 3: dataset hash con macro non risolvibili → TODO esplicito
+        if has_macro:
+            macro_snippet = ""
+            # Estrae la parte %... dal dataset raw per il messaggio
+            ds_full_m = re.search(
+                r"dataset\s*:\s*['\"]([^'\"]*%[^'\"]*)['\"]", txt, re.I | re.S
+            )
+            if ds_full_m:
+                macro_snippet = ds_full_m.group(1).strip()[:200]
+            lines += [
+                f"{pad}# {'=' * 60}",
+                f"{pad}# TODO: REVISIONE MANUALE NECESSARIA",
+                f"{pad}# Motivo    : dataset hash '{h_name}' contiene macro SAS non",
+                f"{pad}#             risolvibili staticamente:",
+                f"{pad}#             {macro_snippet}",
+                f"{pad}# Strategia : sostituire le macro con la condizione SQL",
+                f"{pad}#             equivalente, poi ri-convertire il blocco.",
+                f"{pad}# Righe     : {blk.get('linea_start')} – {blk.get('linea_stop')}",
+                f"{pad}# {'=' * 60}",
+                f"{pad}# {lkp_var} = spark.table(\"{ds or 'TODO_DATASET'}\")"
+                f".filter(...)  # completare manualmente",
+            ]
+            continue
 
         if not ds:
             lines.append(f"{pad}# {h_name}: dataset non rilevato → TODO")
             continue
 
-        # Colonne da selezionare nel lookup
-        all_cols = list(dict.fromkeys(keys + data))  # dedup, ordine mantenuto
+        # Colonne da selezionare nel lookup (dedup, ordine mantenuto)
+        all_cols = list(dict.fromkeys(keys + data))
         if all_cols:
-            sel_str = ", ".join(f'"{c}"' for c in all_cols)
+            sel_str  = ", ".join(f'"{c}"' for c in all_cols)
             lkp_expr = f'spark.table("{ds}").select({sel_str})'
         else:
             lkp_expr = f'spark.table("{ds}")'
 
-        # Chiave join
-        if len(keys) == 1:
-            on_str = f'on="{keys[0]}"'
-        elif keys:
-            on_str = "on=[" + ", ".join(f'"{k}"' for k in keys) + "]"
+        # FIX 2: estrae la chiave passata a T.find(key: col)
+        # Se diversa dalla definekey, usa la forma colonna-esplicita
+        find_keys = []
+        for fm in re.finditer(
+            r'\b' + re.escape(h_name) + r'\s*\.\s*find\s*\(([^)]*)\)',
+            txt, re.I | re.S
+        ):
+            raw_keys = fm.group(1)
+            for kv in re.finditer(r'\bkey\s*:\s*(\w+)', raw_keys, re.I):
+                find_keys.append(kv.group(1).strip())
+
+        # Confronta find_keys con definekeys per rilevare alias
+        use_alias_join = bool(find_keys) and (
+            set(k.lower() for k in find_keys) != set(k.lower() for k in keys)
+        )
+
+        if use_alias_join and find_keys and keys:
+            # Genera join con condizione esplicita sulle colonne
+            if len(find_keys) == 1 and len(keys) == 1:
+                join_cond = (
+                    f'{out_names_all[0] if out_names_all else "src"}[\"{find_keys[0]}\"]'
+                    f' == {lkp_var}[\"{keys[0]}\"]'
+                )
+            else:
+                # Multi-key: genera lista di condizioni
+                pairs = zip(find_keys, keys)
+                conds = " & ".join(
+                    f'F.col("{fk}") == {lkp_var}["{dk}"]' for fk, dk in pairs
+                )
+                join_cond = conds
+            on_str = join_cond
+            use_on_keyword = False
         else:
-            on_str = 'on="TODO_KEY"'
+            # Chiave identica: usa on="col" o on=[...]
+            if len(keys) == 1:
+                on_str = f'on="{keys[0]}"'
+            elif keys:
+                on_str = "on=[" + ", ".join(f'"{k}"' for k in keys) + "]"
+            else:
+                on_str = 'on="TODO_KEY"'
+            use_on_keyword = True
+
+        # Nome variabile di output per questo join
+        join_counter[0] += 1
+        if out_names_all:
+            py_out_ds = out_names_all[0]
+            py_out    = _sas_to_py_var(py_out_ds)
+        else:
+            py_out_ds = f"join{join_counter[0]}"
+            py_out    = py_out_ds
+
+        # Sorgente del join: first hash usa src_ds, successivi usano il risultato precedente
+        join_src = f'spark.table("{src_ds}")' if src_ds else "source_df"
+
+        # FIX 1: applica WHERE clause dalla riga set(where=(...))
+        filter_suffix = ""
+        if where_raw:
+            sql_where = _sas_where_to_spark_sql(where_raw)
+            # Tronca a 200 char per leggibilità; con filtri complessi aggiunge commento
+            if len(sql_where) > 200:
+                filter_suffix = f'\n{pad}    .filter("""\\n    {sql_where}\\n    """)'
+            else:
+                filter_suffix = f'\n{pad}    .filter("{sql_where}")'
 
         if multi or has_find_next:
-            # Caso 2: multidata — join normale (possibili duplicati)
             lines += [
                 f"{pad}# Hash multidata '{h_name}' → join (possibili righe multiple)",
                 f"{pad}{lkp_var} = {lkp_expr}",
             ]
-            if src_ds:
-                out_names = [n for n in re.findall(r'^\s*data\s+(.+?)\s*;', txt, re.I | re.M)]
-                py_out = _sas_to_py_var(out_names[0]) if out_names else "join_result"
-                lines.append(
-                    f"{pad}{py_out} = spark.table(\"{src_ds}\")"
-                    f".join({lkp_var}, {on_str}, how=\"left\")"
-                )
-                ctx.register_df(out_names[0] if out_names else py_out, py_out)
         else:
-            # Caso 1: lookup semplice → broadcast join
             lines += [
                 f"{pad}# Hash lookup '{h_name}' → broadcast join",
                 f"{pad}{lkp_var} = {lkp_expr}",
             ]
-            if src_ds:
-                out_names = [n for n in re.findall(r'^\s*data\s+(.+?)\s*;', txt, re.I | re.M)]
-                py_out = _sas_to_py_var(out_names[0]) if out_names else "join_result"
-                lines.append(
-                    f"{pad}{py_out} = spark.table(\"{src_ds}\")"
-                    f".join(F.broadcast({lkp_var}), {on_str}, how=\"left\")"
-                )
-                ctx.register_df(out_names[0] if out_names else py_out, py_out)
+
+        if src_ds:
+            if use_on_keyword:
+                if multi or has_find_next:
+                    join_line = (
+                        f"{pad}{py_out} = {join_src}"
+                        f"{filter_suffix}"
+                        f"\n{pad}    .join({lkp_var}, {on_str}, how=\"left\")"
+                    )
+                else:
+                    join_line = (
+                        f"{pad}{py_out} = {join_src}"
+                        f"{filter_suffix}"
+                        f"\n{pad}    .join(F.broadcast({lkp_var}), {on_str}, how=\"left\")"
+                    )
+            else:
+                # Alias join con condizione esplicita
+                if multi or has_find_next:
+                    join_line = (
+                        f"{pad}{py_out} = {join_src}"
+                        f"{filter_suffix}"
+                        f"\n{pad}    .join({lkp_var}, {on_str}, how=\"left\")"
+                    )
+                else:
+                    join_line = (
+                        f"{pad}{py_out} = {join_src}"
+                        f"{filter_suffix}"
+                        f"\n{pad}    .join(F.broadcast({lkp_var}), {on_str}, how=\"left\")"
+                    )
+            lines.append(join_line)
+            ctx.register_df(py_out_ds, py_out)
 
     # ── call missing → commento ──────────────────────────────────────
     if re.search(r'\bcall\s+missing\s*\(', txt, re.I):
@@ -1067,10 +1412,18 @@ def convert_data_step(
             drop_str = ", ".join(f'"{c}"' for c in info.drop_cols)
             chain.append(f"{pad}    .drop({drop_str})")
 
-        # Colonnes calculées
+        # Colonnes calculées — FIX 4: prova prima le funzioni date/tempo
         for col_name, col_expr in info.calc_columns:
             py_expr_raw = ctx.resolve_macro_var(col_expr)
-            py_expr     = _sas_expr_to_py(py_expr_raw, ctx)
+            # Tentativo con handler date/tempo specializzato
+            date_line = _sas_date_expr_to_spark(col_name, py_expr_raw, pad + "   ")
+            if date_line:
+                # date_line è già una riga .withColumn(...)  — la aggiungiamo alla chain
+                # rimuovendo il pad iniziale perché chain usa il suo
+                chain.append(date_line.lstrip())
+                continue
+            # Fallback generico
+            py_expr = _sas_expr_to_py(py_expr_raw, ctx)
             # input() già tradotto da _sas_expr_to_py → usare direttamente
             if py_expr.startswith("F.col("):
                 chain.append(f"{pad}    .withColumn(\"{col_name}\", {py_expr})")
