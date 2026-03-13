@@ -1275,6 +1275,47 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
             lines.append(join_line)
             ctx.register_df(py_out_ds, py_out)
 
+    # ── FIX B: assegnazioni colonna → .withColumn(...) ───────────────
+    # Cerca pattern:  varname = espressione;
+    # Esclude: rc, rc1..rc9 (return code hash), hashsize, before, after
+    _SKIP_VARS = re.compile(
+        r'^(rc\d*|hashsize|before|after|_n_|eof|output)$', re.I
+    )
+    col_assignments = []
+    for am in re.finditer(
+        r'^\s*(\w+)\s*=\s*([^;]+);', txt, re.I | re.M
+    ):
+        var   = am.group(1).strip()
+        expr  = am.group(2).strip()
+        if _SKIP_VARS.match(var):
+            continue
+        # Ignora assegnazioni che sono solo un numero (es. SUM_of_importo1=0)
+        if re.match(r'^[\d.]+$', expr):
+            continue
+        # Ignora pattern accumulatore X + Y (già gestito in caso agg)
+        if re.match(r'\w+\s*\+\s*\w+$', expr):
+            continue
+        col_assignments.append((var, expr))
+
+    if col_assignments:
+        # Determina la variabile PySpark corrente su cui aggiungere withColumn
+        # È l'ultima py_out registrata nel ciclo hash (o src_py se nessun join)
+        wc_target = py_out if 'py_out' in dir() else src_py
+        for var, expr in col_assignments:
+            date_line = _sas_date_expr_to_spark(var, expr, "")
+            if date_line:
+                # date_line è ".withColumn(...)" senza pad: rimuovi il punto iniziale
+                wc_expr = date_line.lstrip()   # ".withColumn(...)"
+                lines.append(
+                    f"{pad}{wc_target} = {wc_target}{wc_expr}"
+                )
+            else:
+                # Fallback generico
+                py_expr = _sas_expr_to_py(expr, ctx)
+                lines.append(
+                    f'{pad}{wc_target} = {wc_target}.withColumn("{var}", F.expr("{py_expr}"))'
+                )
+
     # ── call missing → commento ──────────────────────────────────────
     if re.search(r'\bcall\s+missing\s*\(', txt, re.I):
         lines.append(
