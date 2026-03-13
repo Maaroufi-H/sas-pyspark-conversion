@@ -1171,17 +1171,20 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
         )
 
         if use_alias_join and find_keys and keys:
-            # Genera join con condizione esplicita sulle colonne
+            # FIX A: usa "source_df" invece del nome output (che non esiste ancora)
+            # Il pattern diventa:
+            #   source_df = spark.table(src_ds)
+            #   py_out = source_df.join(lookup, source_df["X"] == lookup["Y"], ...)
             if len(find_keys) == 1 and len(keys) == 1:
                 join_cond = (
-                    f'{out_names_all[0] if out_names_all else "src"}[\"{find_keys[0]}\"]'
-                    f' == {lkp_var}[\"{keys[0]}\"]'
+                    f'source_df["{find_keys[0]}"]'
+                    f' == {lkp_var}["{keys[0]}"]'
                 )
             else:
                 # Multi-key: genera lista di condizioni
-                pairs = zip(find_keys, keys)
+                pairs = list(zip(find_keys, keys))
                 conds = " & ".join(
-                    f'F.col("{fk}") == {lkp_var}["{dk}"]' for fk, dk in pairs
+                    f'source_df["{fk}"] == {lkp_var}["{dk}"]' for fk, dk in pairs
                 )
                 join_cond = conds
             on_str = join_cond
@@ -1250,22 +1253,24 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
                         f"{pad})"
                     )
             else:
-                # Alias join con condizione esplicita
+                # Alias join con condizione esplicita (FIX A: usa source_df intermedia)
+                src_line = f"{pad}source_df = {join_src}"
+                if filter_suffix:
+                    src_line = (
+                        f"{pad}source_df = (\n"
+                        f"{pad}    {join_src}"
+                        f"{filter_suffix}\n"
+                        f"{pad})"
+                    )
                 if multi or has_find_next:
                     join_line = (
-                        f"{pad}{py_out} = (\n"
-                        f"{pad}    {join_src}"
-                        f"{filter_suffix}"
-                        f"\n{pad}    .join({lkp_var}, {on_str}, how=\"left\")\n"
-                        f"{pad})"
+                        f"{src_line}\n"
+                        f"{pad}{py_out} = source_df.join({lkp_var}, {on_str}, how=\"left\")"
                     )
                 else:
                     join_line = (
-                        f"{pad}{py_out} = (\n"
-                        f"{pad}    {join_src}"
-                        f"{filter_suffix}"
-                        f"\n{pad}    .join(F.broadcast({lkp_var}), {on_str}, how=\"left\")\n"
-                        f"{pad})"
+                        f"{src_line}\n"
+                        f"{pad}{py_out} = source_df.join(F.broadcast({lkp_var}), {on_str}, how=\"left\")"
                     )
             lines.append(join_line)
             ctx.register_df(py_out_ds, py_out)
