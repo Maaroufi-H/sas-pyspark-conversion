@@ -889,16 +889,23 @@ def _extract_set_where(txt: str) -> Tuple[Optional[str], Optional[str]]:
 
     Usa parsing a parentesi bilanciate per gestire WHERE con parentesi annidate.
     """
-    # Trova tutti i set statement
+    # Trova tutti i set statement: usa il primo che ha opzioni (where=)
+    # oppure l'ultimo set senza opzioni come fallback dataset
+    fallback_ds = None
     for m in re.finditer(r'\bset\s+([\w.]+)((?:\s*\([^;]*\))?)\s*;', txt, re.I | re.S):
         ds_name = m.group(1).strip()
         opts_raw = m.group(2).strip()
         if not opts_raw:
-            return ds_name, None
+            # SET semplice senza opzioni: salva come fallback e continua
+            if fallback_ds is None:
+                fallback_ds = ds_name
+            continue
 
         # Estrae il contenuto tra le parentesi esterne
         if not opts_raw.startswith('('):
-            return ds_name, None
+            if fallback_ds is None:
+                fallback_ds = ds_name
+            continue
 
         # Bilancia parentesi per trovare il contenuto dell'opzione set
         depth = 0
@@ -941,7 +948,7 @@ def _extract_set_where(txt: str) -> Tuple[Optional[str], Optional[str]]:
 
         return ds_name, where_val.strip() if where_val.strip() else None
 
-    return None, None
+    return fallback_ds, None
 
 
 def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
