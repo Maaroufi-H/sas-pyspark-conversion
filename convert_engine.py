@@ -306,31 +306,65 @@ def _sas_date_expr_to_spark(var: str, expr: str, pad: str) -> Optional[str]:
         col_name = col_inner.strip()
         return f'F.{fn}("{col_name}")'
 
-    # Pattern: year(X)*100 + month(X) oppure year(X)*100+month(X)
-    m = re.match(
-        r'year\s*\(([^)]+)\)\s*\*\s*100\s*\+\s*month\s*\(([^)]+)\)',
-        e_norm, re.I
-    )
-    if m:
-        yr_part  = _date_fn('year',  m.group(1).strip())
-        mo_part  = _date_fn('month', m.group(2).strip())
-        spark_expr = f'{yr_part}*100 + {mo_part}'
-        return f'{pad}.withColumn("{var}", {spark_expr})'
+    def _extract_fn_arg(s: str) -> Optional[str]:
+        """Estrae il contenuto della prima coppia di parentesi bilanciate."""
+        p = s.find('(')
+        if p < 0:
+            return None
+        depth = 0
+        for i in range(p, len(s)):
+            if s[i] == '(':
+                depth += 1
+            elif s[i] == ')':
+                depth -= 1
+                if depth == 0:
+                    return s[p+1:i]
+        return None
 
-    # Pattern: year(X)
-    m = re.match(r'year\s*\(([^)]+)\)$', e_norm, re.I)
+    def _fn_and_arg(s: str, fn_name: str):
+        """Verifica che s inizia con fn_name( e restituisce (arg, rest_after_close)."""
+        m2 = re.match(r'(' + fn_name + r')\s*\(', s, re.I)
+        if not m2:
+            return None, None
+        start = m2.end() - 1   # posizione '('
+        depth = 0
+        for i in range(start, len(s)):
+            if s[i] == '(':
+                depth += 1
+            elif s[i] == ')':
+                depth -= 1
+                if depth == 0:
+                    return s[start+1:i], s[i+1:]
+        return None, None
+
+    # Pattern: year(X)*100 + month(X) — supporta X con parentesi annidate
+    m = re.match(r'(year\s*\(.+)\*\s*100\s*\+\s*(month\s*\(.+)', e_norm, re.I)
     if m:
-        return f'{pad}.withColumn("{var}", {_date_fn("year", m.group(1).strip())})'
+        yr_arg, yr_rest = _fn_and_arg(e_norm, 'year')
+        if yr_arg is not None:
+            mo_part_str = yr_rest.lstrip() if yr_rest else ''
+            mo_part_str = re.sub(r'^\*\s*100\s*\+\s*', '', mo_part_str)
+            mo_arg, _ = _fn_and_arg(mo_part_str, 'month')
+            if mo_arg is not None:
+                yr_part = _date_fn('year',  yr_arg.strip())
+                mo_part = _date_fn('month', mo_arg.strip())
+                spark_expr = f'{yr_part}*100 + {mo_part}'
+                return f'{pad}.withColumn("{var}", {spark_expr})'
+
+    # Pattern: year(X) — supporta X con parentesi annidate
+    yr_arg, yr_rest = _fn_and_arg(e_norm, 'year')
+    if yr_arg is not None and (yr_rest or '').strip() == '':
+        return f'{pad}.withColumn("{var}", {_date_fn("year", yr_arg.strip())})'
 
     # Pattern: month(X)
-    m = re.match(r'month\s*\(([^)]+)\)$', e_norm, re.I)
-    if m:
-        return f'{pad}.withColumn("{var}", {_date_fn("month", m.group(1).strip())})'
+    mo_arg, mo_rest = _fn_and_arg(e_norm, 'month')
+    if mo_arg is not None and (mo_rest or '').strip() == '':
+        return f'{pad}.withColumn("{var}", {_date_fn("month", mo_arg.strip())})'
 
     # Pattern: datepart(X)
-    m = re.match(r'datepart\s*\(([^)]+)\)$', e_norm, re.I)
-    if m:
-        col_name = m.group(1).strip()
+    dp_arg, dp_rest = _fn_and_arg(e_norm, 'datepart')
+    if dp_arg is not None and (dp_rest or '').strip() == '':
+        col_name = dp_arg.strip()
         return f'{pad}.withColumn("{var}", F.to_date(F.col("{col_name}")))'
 
     return None
@@ -1277,9 +1311,10 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
 
     # ── FIX B: assegnazioni colonna → .withColumn(...) ───────────────
     # Cerca pattern:  varname = espressione;
-    # Esclude: rc, rc1..rc9 (return code hash), hashsize, before, after
+    # Esclude: rc, rc1..rc9 (return code hash), hashsize, before, after,
+    #          where (è un'opzione SET non una colonna), format, length, keep, drop
     _SKIP_VARS = re.compile(
-        r'^(rc\d*|hashsize|before|after|_n_|eof|output)$', re.I
+        r'^(rc\d*|hashsize|before|after|_n_|eof|output|where|format|length|keep|drop)$', re.I
     )
     col_assignments = []
     for am in re.finditer(
@@ -1294,6 +1329,12 @@ def _convert_hash_object(blk: dict, ctx: ConversionContext) -> str:
             continue
         # Ignora pattern accumulatore X + Y (già gestito in caso agg)
         if re.match(r'\w+\s*\+\s*\w+$', expr):
+            continue
+        # Ignora se l'espressione contiene % (macro SAS non risolvibile)
+        if '%' in expr:
+            continue
+        # Ignora se l'espressione inizia con ( — opzioni di dataset tipo (keep=...)
+        if expr.startswith('('):
             continue
         col_assignments.append((var, expr))
 
